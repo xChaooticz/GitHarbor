@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ repository.upstream_full_name }} · GitHarbor{% endblock %}
+{% block content %}
+<section class="hero compact"><div><p class="eyebrow">{{ repository.kind }} repository</p><h1>{{ repository.upstream_full_name }}</h1><span class="badge {{ repository.status }}">{{ repository.status }}</span></div>
+<form method="post" action="/actions/repositories/{{ repository.id }}/sync"><input type="hidden" name="submit" value="sync"><button {% if repository.status == 'syncing' %}disabled{% endif %}>Sync repository</button></form></section>
+{% if repository.last_error %}<div class="alert"><strong>Last error</strong><p>{{ repository.last_error }}</p></div>{% endif %}
+<section class="panel"><h2>Repository details</h2><dl class="details">
+<dt>Upstream</dt><dd><a href="{{ repository.upstream_url }}" rel="noreferrer">{{ repository.upstream_url }} ↗</a></dd>
+<dt>Destination</dt><dd>{% if repository.destination_url %}<a href="{{ repository.destination_url }}" rel="noreferrer">{{ repository.destination_namespace }}/{{ repository.destination_name }} ↗</a>{% else %}{{ repository.destination_namespace }}/{{ repository.destination_name }} (not created){% endif %}</dd>
+<dt>GitHub ID</dt><dd>{{ repository.github_id }}</dd><dt>First discovered</dt><dd>{{ repository.first_discovered_at }}</dd>
+<dt>Last seen</dt><dd>{{ repository.last_seen_at }}</dd><dt>Last successful sync</dt><dd>{{ repository.last_successful_sync_at or 'Never' }}</dd>
+<dt>Default branch</dt><dd>{{ repository.default_branch or 'Unknown' }}</dd><dt>Private upstream</dt><dd>{{ 'Yes' if repository.upstream_private else 'No' }}</dd>
+</dl></section>
+<section class="panel"><h2>Synchronization history</h2><div class="table-wrap"><table><thead><tr><th>Started</th><th>Trigger</th><th>Status</th><th>Message</th></tr></thead><tbody>
+{% for run in runs %}<tr><td>{{ run.started_at }}</td><td>{{ run.trigger }}</td><td><span class="badge {{ run.status }}">{{ run.status }}</span></td><td>{{ run.message or '—' }}</td></tr>
+{% else %}<tr><td colspan="4" class="empty">No synchronization attempts yet.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

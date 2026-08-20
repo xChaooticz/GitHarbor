@@ -1,0 +1,21 @@
+services:
+  githarbor:
+    build: .
+    image: githarbor:local
+    container_name: githarbor
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/githarbor.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - githarbor-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  githarbor-data:

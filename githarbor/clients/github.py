@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import asyncio
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+
+class GitHubError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class UpstreamRepository:
+    github_id: int
+    node_id: str | None
+    owner: str
+    name: str
+    full_name: str
+    html_url: str
+    clone_url: str
+    default_branch: str | None
+    private: bool
+    archived: bool
+    fork: bool
+
+    @classmethod
+    def from_github(cls, data: dict[str, Any]) -> UpstreamRepository:
+        return cls(
+            github_id=int(data["id"]),
+            node_id=data.get("node_id"),
+            owner=str(data["owner"]["login"]),
+            name=str(data["name"]),
+            full_name=str(data["full_name"]),
+            html_url=str(data["html_url"]),
+            clone_url=str(data["clone_url"]),
+            default_branch=data.get("default_branch"),
+            private=bool(data.get("private", False)),
+            archived=bool(data.get("archived", False)),
+            fork=bool(data.get("fork", False)),
+        )
+
+
+class GitHubClient:
+    def __init__(self, api_base: str, token: str, username: str, timeout: int = 30) -> None:
+        self.username = username
+        self._client = httpx.AsyncClient(
+            base_url=f"{api_base.rstrip('/')}/",
+            timeout=timeout,
+            follow_redirects=False,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "GitHarbor/0.1",
+            },
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def authenticated_user(self) -> dict[str, Any]:
+        data = await self._request("GET", "user")
+        if not isinstance(data, dict):
+            raise GitHubError("GitHub returned an invalid authenticated user response")
+        return data
+
+    async def list_owned(self) -> list[UpstreamRepository]:
+        user = await self.authenticated_user()
+        if str(user.get("login", "")).casefold() != self.username.casefold():
+            raise GitHubError(
+                "GITHUB_USERNAME must match the GitHub account that owns GITHUB_TOKEN "
+                "so private owned repositories can be discovered safely"
+            )
+        payloads = await self._paginate(
+            "user/repos", params={"affiliation": "owner", "visibility": "all", "sort": "full_name"}
+        )
+        return [
+            UpstreamRepository.from_github(item)
+            for item in payloads
+            if str(item.get("owner", {}).get("login", "")).casefold() == self.username.casefold()
+        ]
+
+    async def list_starred(self) -> list[UpstreamRepository]:
+        payloads = await self._paginate(f"users/{self.username}/starred")
+        return [UpstreamRepository.from_github(item) for item in payloads]
+
+    async def get_repository(self, full_name: str) -> UpstreamRepository:
+        if full_name.count("/") != 1:
+            raise GitHubError("Invalid GitHub repository name")
+        data = await self._request("GET", f"repos/{full_name}")
+        if not isinstance(data, dict):
+            raise GitHubError("GitHub returned an invalid repository response")
+        return UpstreamRepository.from_github(data)
+
+    async def _paginate(
+        self, path: str, params: dict[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        next_url: str | None = path
+        request_params: dict[str, str] | None = {"per_page": "100", **(params or {})}
+        visited: set[str] = set()
+        while next_url:
+            request_key = f"{next_url}|{request_params}"
+            if request_key in visited:
+                raise GitHubError("GitHub returned a pagination loop")
+            visited.add(request_key)
+            response = await self._raw_request("GET", next_url, params=request_params)
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise GitHubError("GitHub returned an invalid paginated response")
+            items.extend(item for item in payload if isinstance(item, dict))
+            next_link = response.links.get("next", {}).get("url")
+            next_url = str(next_link) if next_link else None
+            # Passing an empty params mapping would strip the query from GitHub's absolute next URL.
+            request_params = None
+        return items
+
+    async def _request(self, method: str, path: str) -> Any:
+        return (await self._raw_request(method, path)).json()
+
+    async def _raw_request(
+        self, method: str, path: str, params: dict[str, str] | None = None
+    ) -> httpx.Response:
+        for attempt in range(3):
+            try:
+                response = await self._client.request(method, path, params=params)
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise GitHubError(f"GitHub request failed: {exc.__class__.__name__}") from exc
+                await asyncio.sleep(2**attempt)
+                continue
+            if response.status_code in {502, 503, 504} and attempt < 2:
+                await asyncio.sleep(2**attempt)
+                continue
+            if response.is_error:
+                reset = response.headers.get("x-ratelimit-reset")
+                rate_note = ""
+                if reset and response.status_code in {403, 429}:
+                    with suppress(ValueError):
+                        rate_note = (
+                            f"; rate limit resets at {datetime.fromtimestamp(int(reset), UTC)}"
+                        )
+                raise GitHubError(f"GitHub API returned HTTP {response.status_code}{rate_note}")
+            return response
+        raise AssertionError("unreachable")

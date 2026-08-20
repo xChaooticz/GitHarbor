@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · GitHarbor{% endblock %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">Preservation status</p><h1>Your repositories are in safe harbor.</h1>
+  <p class="muted">GitHarbor mirrors owned and starred GitHub repositories without deleting preserved copies.</p></div>
+  <form method="post" action="/actions/sync"><button {% if status.sync_running %}disabled{% endif %}>
+    {{ "Sync running…" if status.sync_running else "Sync now" }}</button></form>
+</section>
+<section class="connections">
+  <div><span class="dot {{ status.github }}"></span>GitHub <strong>{{ status.github|capitalize }}</strong></div>
+  <div><span class="dot {{ status.gitea }}"></span>Gitea <strong>{{ status.gitea|capitalize }}</strong></div>
+  <div>Next sync <strong>{{ status.next_sync.strftime('%Y-%m-%d %H:%M UTC') if status.next_sync else 'Not scheduled' }}</strong></div>
+</section>
+<section class="cards">
+  {% for label, value, tone in [
+    ('Owned', status.counts.owned, 'blue'), ('Starred', status.counts.starred, 'gold'),
+    ('Active', status.counts.active, 'green'), ('Unavailable', status.counts.unavailable, 'gray'),
+    ('Unstarred', status.counts.unstarred, 'gray'), ('Errors', status.counts.error, 'red')] %}
+  <a class="card {{ tone }}" href="/repositories{% if label|lower in ['owned','starred'] %}?kind={{ label|lower }}{% elif label == 'Errors' %}?status=error{% elif label != 'Active' %}?status={{ label|lower }}{% endif %}">
+    <span>{{ label }}</span><strong>{{ value }}</strong>
+  </a>{% endfor %}
+</section>
+<section class="panel">
+  <h2>Last synchronization</h2>
+  {% if status.last_sync %}
+  <dl class="details"><dt>Status</dt><dd><span class="badge {{ status.last_sync.status }}">{{ status.last_sync.status }}</span></dd>
+    <dt>Started</dt><dd>{{ status.last_sync.started_at }}</dd><dt>Repositories</dt><dd>{{ status.last_sync.succeeded }} succeeded · {{ status.last_sync.failed }} failed</dd>
+    {% if status.last_sync.message %}<dt>Message</dt><dd class="error-text">{{ status.last_sync.message }}</dd>{% endif %}</dl>
+  {% else %}<p class="empty">No synchronization has run yet.</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Repositories · GitHarbor{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">Inventory</p><h1>Repositories</h1></div></section>
+<form class="filters" method="get">
+  <input type="search" name="search" value="{{ filters.search }}" placeholder="Search owner or repository">
+  <select name="kind"><option value="">All types</option><option value="owned" {% if filters.kind == 'owned' %}selected{% endif %}>Owned</option><option value="starred" {% if filters.kind == 'starred' %}selected{% endif %}>Starred</option></select>
+  <select name="status"><option value="">All statuses</option>{% for option in ['active','syncing','unavailable','unstarred','error','archived'] %}<option value="{{ option }}" {% if filters.status == option %}selected{% endif %}>{{ option|capitalize }}</option>{% endfor %}</select>
+  <button class="secondary">Filter</button>
+</form>
+<div class="table-wrap"><table><thead><tr><th>Repository</th><th>Type</th><th>Status</th><th>Last synced</th><th>Destination</th></tr></thead>
+<tbody>{% for repository in repositories %}<tr><td><a class="repo-link" href="/repositories/{{ repository.id }}">{{ repository.upstream_full_name }}</a><br><a class="subtle" href="{{ repository.upstream_url }}" rel="noreferrer">GitHub ↗</a></td>
+<td><span class="badge kind">{{ repository.kind }}</span></td><td><span class="badge {{ repository.status }}">{{ repository.status }}</span></td>
+<td>{{ repository.last_successful_sync_at.strftime('%Y-%m-%d %H:%M') if repository.last_successful_sync_at else 'Never' }}</td>
+<td>{% if repository.destination_url %}<a href="{{ repository.destination_url }}" rel="noreferrer">{{ repository.destination_namespace }}/{{ repository.destination_name }} ↗</a>{% else %}<span class="muted">Pending</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="empty">No repositories match these filters.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}
