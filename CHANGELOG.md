@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-21
+
+### Added
+
+- Beginner-focused installation guide covering Docker networking, Gitea preparation, first startup,
+  verification, and safe exposure.
+- Least-privilege GitHub and Gitea token walkthroughs with fine-grained, classic, organization, and
+  personal-namespace variants.
+- Gitea organization, complete configuration, operations, backup, recovery, Git LFS verification,
+  and troubleshooting documentation.
+- Version-controlled sources for the public GitHub Wiki, including navigation and project overview.
+
+### Changed
+
+- Corrected credential guidance to require Gitea `read:user`, `write:organization`, and
+  `write:repository` for organization destinations while removing an unnecessary GitHub
+  `read:user` recommendation.
+- Expanded README navigation and setup links so new operators can reach the full guides directly.
+
 ## [0.1.0] - 2026-08-21
 
 ### Added
@@ -29,5 +48,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xChaooticz/GitHarbor/releases/tag/v0.1.0

@@ -7,6 +7,8 @@
 <p align="center"><strong>Your self-hosted safe harbor for Git repositories.</strong></p>
 
 <p align="center">
+  <a href="docs/wiki/Getting-Started.md">Documentation</a> ·
+  <a href="https://github.com/xChaooticz/GitHarbor/wiki">Wiki</a> ·
   <a href="LICENSE">MIT License</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
@@ -43,6 +45,9 @@ See [Architecture decisions](docs/architecture.md) for identity, naming, safety,
 
 ## Quick start with Docker Compose
 
+New to GitHarbor? The complete [Getting started guide](docs/wiki/Getting-Started.md) explains Docker
+networking, both provider tokens, Gitea organizations, Git LFS, first-run verification, and security.
+
 ```sh
 cp .env.example .env
 # Edit .env with tokens, usernames, namespaces, and the Gitea URL.
@@ -69,8 +74,10 @@ authenticated account. GitHarbor never writes to GitHub.
   **Contents: read**, and account **Starring: read**. New private repositories must also be added to
   the token's repository selection (or select all repositories).
 - Classic PAT: `repo` is needed to clone private repositories. Public-only operation can use the
-  smaller public read access supported by GitHub. Add `read:user` if your organization policy or
-  account setup requires it.
+  smaller public read access supported by GitHub. GitHarbor does not require the `read:user` scope.
+
+See [Tokens and permissions](docs/wiki/Tokens-and-Permissions.md) for click-by-click creation steps,
+least-privilege selections, enterprise notes, and rotation instructions.
 
 Organization SSO restrictions still apply. A GitHub `404` can mean deletion, lost access, or an SSO
 authorization problem; GitHarbor therefore treats absence as state, never as permission to delete.
@@ -79,9 +86,12 @@ authorization problem; GitHarbor therefore treats absence as state, never as per
 
 Create an API token for a dedicated Gitea account. It needs repository read/write access, permission
 to create repositories in both configured organizations (or in its own user namespace), and Git
-push access. With scoped-token Gitea versions, enable repository write and organization write for
-organization destinations. GitHarbor verifies `/api/v1/user` and accepts a destination namespace
-only when it is an organization accessible to the token or the authenticated user's own namespace.
+push access. With scoped-token Gitea versions and organization destinations, grant `read:user`,
+`write:organization`, and `write:repository`. A personal-user destination needs `write:user` instead
+of `read:user`. GitHarbor verifies `/api/v1/user` and accepts a destination namespace only when it is
+an organization accessible to the token or the authenticated user's own namespace. The
+[Gitea organizations guide](docs/wiki/Gitea-Organizations.md) covers the recommended two-organization
+layout.
 
 Tokens stay in environment memory. They are not persisted to SQLite, HTML, API output, Git config,
 or command arguments. Git authentication uses a temporary askpass helper whose token comes from a
@@ -183,6 +193,9 @@ Git LFS transfer between temporary local bare repositories; `git-lfs` is therefo
 local testing and is installed in the Docker test stage.
 
 ## Troubleshooting
+
+See the full [Troubleshooting guide](docs/wiki/Troubleshooting.md) for provider permissions,
+container networking, namespace errors, LFS failures, scheduling, and safe issue reports.
 
 - **GitHub username mismatch:** the token account and `GITHUB_USERNAME` must match. This prevents a
   public-only endpoint from silently omitting private owned repositories.
