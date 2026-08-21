@@ -7,10 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-21
+
 ### Added
 
 - Automated multi-platform GHCR publishing for releases, plus a manual workflow for rebuilding a
   specific release tag.
+- A complete Docker Compose startup and health-endpoint test, followed by a blocking container
+  vulnerability scan on every change and a weekly schedule.
+- An on-NAS installation and upgrade verification procedure in the operations guide.
 
 ### Changed
 
@@ -18,6 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--build` path and an optional `GITHARBOR_IMAGE_TAG` release pin.
 - The default loopback dashboard port changed from `8000` to `9005`; the container continues to
   listen on internal port `8000`.
+- All third-party GitHub Actions are pinned to immutable commits and kept current by Dependabot.
+
+### Security
+
+- The Docker build installs current Debian security upgrades, and CI rejects fixable high or
+  critical operating-system and Python-package vulnerabilities.
 
 ## [0.5.0] - 2026-08-21
 
@@ -129,7 +140,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...v0.3.0

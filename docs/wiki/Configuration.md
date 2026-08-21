@@ -8,7 +8,7 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.5.0` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.5.1` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 
 ## Required settings

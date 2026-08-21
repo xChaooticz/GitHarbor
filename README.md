@@ -71,7 +71,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.5.0` in `.env` to pin a specific published release. Private GHCR
+Set `GITHARBOR_IMAGE_TAG=v0.5.1` in `.env` to pin a specific published release. Private GHCR
 packages require `docker login ghcr.io` before Compose can pull them.
 
 Open <http://127.0.0.1:9005>. Compose maps host port `9005` to the container's internal port `8000`
@@ -301,6 +301,12 @@ docker compose config
 Tests use temporary SQLite databases and mocked clients. The suite also performs a real, token-free
 Git LFS transfer between temporary local bare repositories; `git-lfs` is therefore required for
 local testing and is installed in the Docker test stage.
+
+GitHub Actions also starts the complete Compose service, checks the public health endpoint, and
+blocks merges or releases when Trivy finds a fixable high or critical vulnerability in the image.
+The container check runs weekly as well, so newly disclosed vulnerabilities are caught even when
+the source has not changed. Third-party actions are pinned to immutable commits and updated through
+Dependabot.
 
 ## Troubleshooting
 
