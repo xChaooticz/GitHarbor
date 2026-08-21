@@ -38,6 +38,11 @@ LFS URLs are derived from the trusted API clone URLs, preventing repository-cont
 from redirecting an askpass credential. Locks and unreachable server-side LFS objects are not part
 of the Git ref graph and are deliberately outside this guarantee.
 
+GitHub wikis are separate Git repositories rather than part of the primary repository. GitHarbor
+uses the upstream `has_wiki` capability as a cheap first check, verifies that the wiki remote has
+refs so an enabled but empty wiki can be skipped, enables Gitea's native wiki unit, and mirror-pushes
+the complete wiki history. Wiki repositories do not use the primary repository's LFS transfer path.
+
 ## Concurrency and recovery
 
 One in-process lock covers global discovery; one lock per database repository ID protects temporary

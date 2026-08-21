@@ -21,6 +21,7 @@ def payload(repo_id: int, owner: str, name: str) -> dict[str, object]:
         "private": False,
         "archived": False,
         "fork": False,
+        "has_wiki": True,
     }
 
 
@@ -70,6 +71,8 @@ async def test_starred_discovery() -> None:
     result = await client.list_starred()
     await client.close()
     assert result[0].full_name == "someone/project"
+    assert result[0].has_wiki is True
+    assert result[0].wiki_clone_url == "https://github.test/someone/project.wiki.git"
 
 
 @pytest.mark.asyncio

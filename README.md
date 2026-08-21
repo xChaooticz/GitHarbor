@@ -15,14 +15,16 @@
 </p>
 
 GitHarbor continuously discovers repositories owned and starred by one GitHub account and mirrors
-their Git data into separate Gitea namespaces. Its defining rule is preservation: a repository that
-vanishes, becomes inaccessible, is transferred, or is unstarred remains in Gitea. GitHarbor records
-the change in state and never automatically deletes a destination repository.
+their Git data and populated wikis into separate Gitea namespaces. Its defining rule is
+preservation: a repository that vanishes, becomes inaccessible, is transferred, or is unstarred
+remains in Gitea. GitHarbor records the change in state and never automatically deletes a
+destination repository.
 
 ## Features
 
 - Complete bare Git mirrors: branches, tags, history, notes, and other refs via `git push --mirror`
 - Authenticated Git LFS object preservation across all mirrored refs
+- Native Gitea wiki mirrors with complete GitHub wiki history and empty-wiki detection
 - Stable GitHub repository IDs for rename/transfer detection
 - Collision-proof starred naming and guarded Gitea ownership markers
 - Independent, paginated owned/starred discovery with transient API retries and rate-limit reporting
@@ -39,7 +41,8 @@ GitHarbor is one Python process. FastAPI serves the UI/API, an asyncio scheduler
 reconciliation service, HTTPX clients speak to GitHub and Gitea, and SQLAlchemy stores inventory and
 run history in SQLite. Each repository operation clones a bare mirror into an isolated OS temporary
 directory, transfers referenced LFS objects, pushes the refs, and removes the directory. There are no
-persistent working trees.
+persistent working trees. Populated GitHub wikis are mirrored separately through their Git
+repositories into Gitea's native wiki repositories.
 
 See [Architecture decisions](docs/architecture.md) for identity, naming, safety, and failure rules.
 
@@ -154,6 +157,19 @@ Gitea must have its LFS server enabled (`LFS_START_SERVER = true`). GitHarbor pr
 reachable from mirrored refs; LFS locks and already-orphaned server objects are outside the Git
 history and are not copied.
 
+## Wiki mirroring
+
+GitHarbor reads GitHub's repository-level wiki capability flag on every discovery or individual
+sync. Disabled wikis are skipped without another network operation. For an enabled wiki, GitHarbor
+checks the separate `<repository>.wiki.git` remote for refs; an enabled but never-created wiki is
+also skipped.
+
+When pages exist, GitHarbor enables the native wiki unit on the managed Gitea destination and uses a
+bare mirror push to preserve every wiki commit and ref. Like the primary Git mirror, this makes the
+GitHub wiki authoritative: an upstream wiki force-update or ref deletion is reflected in Gitea.
+GitHub wiki attachments committed into the wiki repository are ordinary Git objects and are
+preserved. A wiki clone or push failure marks that repository synchronization as an error.
+
 ## API
 
 - `GET /api/health`
@@ -214,8 +230,8 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
 
 - One GitHub identity and one application replica per SQLite database
 - No built-in login/RBAC; use an authenticated reverse proxy
-- No issue, pull request, Actions, discussion, wiki, release-asset, LFS-lock, or orphaned-LFS-object
-  migration
+- No issue, pull request, Actions, discussion, release, release-asset, LFS-lock, or
+  orphaned-LFS-object migration
 - In-process locks do not coordinate multiple GitHarbor containers; run one replica
 - Destination repository visibility is applied only at creation
 

@@ -222,6 +222,26 @@ class SyncService:
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
                 )
+                if upstream.has_wiki:
+                    has_wiki_content = await self.git.remote_has_refs(
+                        upstream.wiki_clone_url,
+                        self.settings.github_token.get_secret_value(),
+                    )
+                    if has_wiki_content:
+                        await self.gitea.enable_wiki(namespace, destination)
+                        await self.git.mirror_wiki(
+                            source_url=upstream.wiki_clone_url,
+                            source_token=self.settings.github_token.get_secret_value(),
+                            destination_url=destination_repo.wiki_clone_url,
+                            destination_token=self.settings.gitea_token.get_secret_value(),
+                            destination_username=str(user["login"]),
+                        )
+                        logger.info("Mirrored wiki for GitHub repository %s", upstream.full_name)
+                    else:
+                        logger.info(
+                            "Skipped enabled but empty wiki for GitHub repository %s",
+                            upstream.full_name,
+                        )
                 now = utcnow()
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)

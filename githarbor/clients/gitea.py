@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -21,6 +22,12 @@ class DestinationRepository:
     name: str
     clone_url: str
     html_url: str
+
+    @property
+    def wiki_clone_url(self) -> str:
+        parsed = urlsplit(self.clone_url)
+        path = parsed.path.removesuffix(".git") + ".wiki.git"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
 
 
 def management_marker(github_id: int, kind: str) -> str:
@@ -50,6 +57,14 @@ class GiteaClient:
             raise GiteaError("Gitea returned an invalid authenticated user response")
         self._authenticated_login = str(data["login"])
         return data
+
+    async def enable_wiki(self, namespace: str, name: str) -> None:
+        payload = await self._request("PATCH", f"repos/{namespace}/{name}", json={"has_wiki": True})
+        if not isinstance(payload, dict) or not payload.get("has_wiki"):
+            raise GiteaError(
+                f"Gitea did not enable the wiki for {namespace}/{name}; "
+                "check whether the wiki repository unit is globally available"
+            )
 
     async def ensure_repository(
         self,

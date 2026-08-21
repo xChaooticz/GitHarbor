@@ -117,6 +117,20 @@ git lfs fsck
 If LFS data exists only on a non-default branch, also check that branch. GitHarbor transfers objects
 reachable from all mirrored refs, not only the default branch.
 
+## Verify wiki preservation
+
+For a GitHub repository with at least one wiki page, open the **Wiki** tab on its managed Gitea
+destination. The page content and revision history should be present. You can also verify the Git
+history directly:
+
+```sh
+git clone https://gitea.example.com/github-backups/example.wiki.git wiki-restore-test
+git -C wiki-restore-test log --oneline --all
+```
+
+Repositories with the GitHub wiki feature disabled, or enabled without any pages, are intentionally
+skipped. A populated wiki that cannot be cloned or pushed makes the repository sync fail visibly.
+
 ## Disaster recovery order
 
 1. Restore Gitea, including its database, repositories, configuration, and LFS storage.

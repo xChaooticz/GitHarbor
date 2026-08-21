@@ -30,17 +30,72 @@ class GitMirror:
         destination_token: str,
         destination_username: str,
     ) -> None:
+        await self._mirror_repository(
+            source_url=source_url,
+            source_token=source_token,
+            destination_url=destination_url,
+            destination_token=destination_token,
+            destination_username=destination_username,
+            transfer_lfs=self.lfs_enabled,
+            directory_name="repository.git",
+        )
+
+    async def mirror_wiki(
+        self,
+        source_url: str,
+        source_token: str,
+        destination_url: str,
+        destination_token: str,
+        destination_username: str,
+    ) -> None:
+        await self._mirror_repository(
+            source_url=source_url,
+            source_token=source_token,
+            destination_url=destination_url,
+            destination_token=destination_token,
+            destination_username=destination_username,
+            transfer_lfs=False,
+            directory_name="wiki.git",
+        )
+
+    async def remote_has_refs(self, source_url: str, source_token: str) -> bool:
+        with tempfile.TemporaryDirectory(prefix="githarbor-wiki-check-") as temporary:
+            root = Path(temporary)
+            askpass = self._create_askpass(root)
+            returncode, stdout, stderr = await self._execute(
+                ["git", "ls-remote", "--heads", "--tags", "--", source_url],
+                root,
+                self._environment(askpass, "x-access-token", source_token),
+            )
+        if returncode == 0:
+            return bool(stdout.strip())
+        detail = stderr.decode("utf-8", errors="replace").casefold()
+        if "repository not found" in detail or "does not appear to be a git repository" in detail:
+            return False
+        raise GitError(redact(detail.strip() or "Git remote check failed", [source_token])[:4000])
+
+    async def _mirror_repository(
+        self,
+        source_url: str,
+        source_token: str,
+        destination_url: str,
+        destination_token: str,
+        destination_username: str,
+        *,
+        transfer_lfs: bool,
+        directory_name: str,
+    ) -> None:
         with tempfile.TemporaryDirectory(prefix="githarbor-") as temporary:
             root = Path(temporary)
             askpass = self._create_askpass(root)
-            mirror_path = root / "repository.git"
+            mirror_path = root / directory_name
             await self._run(
                 self.clone_command(source_url, mirror_path),
                 root,
                 self._environment(askpass, "x-access-token", source_token),
                 [source_token],
             )
-            if self.lfs_enabled:
+            if transfer_lfs:
                 await self._run(
                     self.lfs_fetch_command(mirror_path, source_url),
                     root,
@@ -179,6 +234,20 @@ class GitMirror:
         env: Mapping[str, str],
         secrets: list[str],
     ) -> None:
+        returncode, stdout, stderr = await self._execute(command, cwd, env)
+        if returncode:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            if not detail:
+                detail = stdout.decode("utf-8", errors="replace").strip()
+            raise GitError(redact(detail or "Git command failed", secrets)[:4000])
+
+    async def _execute(
+        self,
+        command: Sequence[str],
+        cwd: Path,
+        env: Mapping[str, str],
+    ) -> tuple[int, bytes, bytes]:
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -192,19 +261,16 @@ class GitMirror:
                 process.communicate(), timeout=self.timeout_seconds
             )
         except TimeoutError as exc:
-            if "process" in locals():
+            if process is not None:
                 process.kill()
                 await process.communicate()
             raise GitError(f"Git operation timed out after {self.timeout_seconds} seconds") from exc
         except asyncio.CancelledError:
-            if "process" in locals() and process.returncode is None:
+            if process is not None and process.returncode is None:
                 process.kill()
                 await process.communicate()
             raise
         except OSError as exc:
             raise GitError(f"Unable to execute Git: {exc.__class__.__name__}") from exc
-        if process.returncode:
-            detail = stderr.decode("utf-8", errors="replace").strip()
-            if not detail:
-                detail = stdout.decode("utf-8", errors="replace").strip()
-            raise GitError(redact(detail or "Git command failed", secrets)[:4000])
+        assert process.returncode is not None
+        return process.returncode, stdout, stderr

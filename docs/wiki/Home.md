@@ -1,8 +1,8 @@
 # GitHarbor documentation
 
 GitHarbor discovers repositories owned and starred by one GitHub account and preserves their Git
-history and reachable Git LFS objects in Gitea. It never automatically deletes a destination
-repository when the source disappears or a star is removed.
+history, populated wikis, and reachable Git LFS objects in Gitea. It never automatically deletes a
+destination repository when the source disappears or a star is removed.
 
 ## Start here
 
@@ -22,11 +22,12 @@ repository when the source disappears or a star is removed.
 
 - Branches, tags, commit history, notes, and other Git refs
 - Git LFS objects reachable from mirrored refs when LFS support is enabled
+- Complete commit history for populated GitHub wikis in Gitea's native wiki
 - A stable mapping based on GitHub's numeric repository ID, even after a rename or transfer
 - The last known Gitea copy when a repository becomes inaccessible or is unstarred
 
-GitHarbor does not migrate issues, pull requests, Actions, releases, wikis, discussions, release
-assets, LFS locks, or LFS objects that are no longer reachable from a Git ref.
+GitHarbor does not migrate issues, pull requests, Actions, releases, discussions, release assets,
+LFS locks, or LFS objects that are no longer reachable from a Git ref.
 
 ## Important safety rules
 

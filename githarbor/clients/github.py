@@ -5,6 +5,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -26,6 +27,13 @@ class UpstreamRepository:
     private: bool
     archived: bool
     fork: bool
+    has_wiki: bool
+
+    @property
+    def wiki_clone_url(self) -> str:
+        parsed = urlsplit(self.clone_url)
+        path = parsed.path.removesuffix(".git") + ".wiki.git"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
 
     @classmethod
     def from_github(cls, data: dict[str, Any]) -> UpstreamRepository:
@@ -41,6 +49,7 @@ class UpstreamRepository:
             private=bool(data.get("private", False)),
             archived=bool(data.get("archived", False)),
             fork=bool(data.get("fork", False)),
+            has_wiki=bool(data.get("has_wiki", False)),
         )
 
 

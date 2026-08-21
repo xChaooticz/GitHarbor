@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
+### Added
+
+- Continuous GitHub wiki detection and full-history mirroring into each managed Gitea repository's
+  native wiki.
+- Empty-wiki detection that skips repositories whose wiki feature is enabled but has no pages.
+- Integration coverage proving wiki contents and commit history survive a real Git mirror.
+
+### Changed
+
+- Git mirroring now uses a shared internal path for primary repositories and wiki repositories while
+  retaining fail-closed Git LFS behavior for the primary repository.
+
 ## [0.1.1] - 2026-08-21
 
 ### Added
@@ -48,6 +62,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xChaooticz/GitHarbor/releases/tag/v0.1.0

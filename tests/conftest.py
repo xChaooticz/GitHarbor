@@ -21,6 +21,7 @@ def upstream() -> UpstreamRepository:
         private=False,
         archived=False,
         fork=False,
+        has_wiki=False,
     )
 
 
