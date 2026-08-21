@@ -31,6 +31,7 @@ before filling in token values.
 | `DATABASE_PATH` | `/data/githarbor.db` | SQLite inventory and run-history path |
 | `DESTINATION_PRIVATE` | `true` | Make newly created Gitea repositories private |
 | `API_TIMEOUT_SECONDS` | `30` | Timeout for one GitHub or Gitea API request; minimum 5 |
+| `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Timeout for each asset download or upload; minimum 30 |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload reachable LFS objects before pushing refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Timeout for each Git or Git LFS command; minimum 30 |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
@@ -52,6 +53,7 @@ SYNC_ON_STARTUP=true
 DATABASE_PATH=/data/githarbor.db
 DESTINATION_PRIVATE=true
 API_TIMEOUT_SECONDS=30
+RELEASE_ASSET_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
 LOG_LEVEL=INFO
@@ -86,6 +88,11 @@ see [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Org
 `API_TIMEOUT_SECONDS` covers individual HTTP API calls. GitHarbor retries transient API and rate
 limit failures independently.
 
+`RELEASE_ASSET_TIMEOUT_SECONDS` applies separately to each GitHub release-asset download and Gitea
+upload. Assets are processed one at a time, so temporary space needs to fit only the current asset.
+Increasing this timeout does not change Gitea's attachment limit or a reverse proxy's request-body
+limit.
+
 `GIT_TIMEOUT_SECONDS` applies to each clone, LFS transfer, and push command. Increase it when large
 repositories fail at a repeatable duration. Also confirm that the container host has enough temporary
 space for one bare repository and its reachable LFS objects.
@@ -104,4 +111,4 @@ replicas against the same SQLite file.
 
 The supplied port mapping is `127.0.0.1:8000:8000`, so only the Docker host can reach the dashboard.
 Do not change it to a public bind unless an authenticated reverse proxy or equivalent access control
-protects the service. GitHarbor v0.1 has no built-in login.
+protects the service. GitHarbor has no built-in login.

@@ -10,7 +10,7 @@ You need:
 - A machine with Docker and the Docker Compose v2 plugin (`docker compose version`)
 - A GitHub account whose personal repositories and stars should be preserved
 - A running Gitea instance that the GitHarbor container can reach over HTTP or HTTPS
-- Enough storage in Gitea for every repository and reachable Git LFS object
+- Enough storage in Gitea for every repository, reachable Git LFS object, and release asset
 
 Use a supported Docker installation from the
 [official Docker documentation](https://docs.docker.com/engine/install/). GitHarbor builds Git and
@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.1.1
+git checkout v0.3.0
 ```
 
 ## 3. Prepare Gitea
@@ -66,8 +66,8 @@ Restart Gitea after changing its configuration.
 
 Create:
 
-- A read-only GitHub token for discovery, cloning, and LFS downloads
-- A Gitea token that can inspect namespaces, create repositories, push Git refs, and upload LFS data
+- A read-only GitHub token for discovery, cloning, release assets, and LFS downloads
+- A Gitea token that can create repositories, push Git/LFS data, and write releases and attachments
 
 Do not select blanket access when granular permissions are available. The exact screens and minimal
 permissions are documented in
@@ -103,6 +103,7 @@ SYNC_ON_STARTUP=true
 DATABASE_PATH=/data/githarbor.db
 DESTINATION_PRIVATE=true
 API_TIMEOUT_SECONDS=30
+RELEASE_ASSET_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
 LOG_LEVEL=INFO
@@ -147,6 +148,8 @@ Then verify in Gitea:
    `owner--repository--gh123456`.
 3. A repository that uses LFS can be cloned from Gitea and checked with `git lfs pull` and
    `git lfs fsck`.
+4. A populated GitHub wiki appears under the managed repository's Gitea **Wiki** tab.
+5. A GitHub release appears under Gitea **Releases**, with its transferable assets downloadable.
 
 The dashboard's manual **Sync all repositories** action is useful after correcting a token or
 network issue. It is safe to retry; overlapping global runs are rejected.
@@ -154,7 +157,7 @@ network issue. It is safe to retry; overlapping global runs are rejected.
 ## 8. Secure and operate it
 
 Compose binds the dashboard to `127.0.0.1:8000`. Keep that default unless you place GitHarbor behind
-an authenticated HTTPS reverse proxy or another trusted access layer. GitHarbor v0.1 has no built-in
+an authenticated HTTPS reverse proxy or another trusted access layer. GitHarbor has no built-in
 authentication, so anyone who can reach the dashboard can trigger synchronization.
 
 Next, read [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) for upgrades,

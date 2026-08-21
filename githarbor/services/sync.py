@@ -22,6 +22,7 @@ from githarbor.models import (
 from githarbor.services.git import GitMirror
 from githarbor.services.reconciliation import Reconciler
 from githarbor.services.redaction import redact
+from githarbor.services.releases import ReleaseMirrorService
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class SyncService:
         self.github = github
         self.gitea = gitea
         self.git = git
+        self.release_mirror = ReleaseMirrorService(github, gitea)
         self.reconciler = Reconciler()
         self.global_lock = asyncio.Lock()
         self._repository_locks: dict[int, asyncio.Lock] = {}
@@ -144,22 +146,33 @@ class SyncService:
 
             succeeded = 0
             failed = 0
+            warnings = 0
             for (repository_id, _kind), upstream in discovered_by_id.items():
                 if await self.sync_repository(repository_id, trigger="global", upstream=upstream):
                     succeeded += 1
+                    with self.database.session_factory() as session:
+                        repository = session.get(Repository, repository_id)
+                        if repository is not None and repository.last_warning:
+                            warnings += 1
                 else:
                     failed += 1
 
             if discovery_errors and not discovered_by_id:
                 status = RunStatus.FAILED
-            elif discovery_errors or failed:
+            elif discovery_errors or failed or warnings:
                 status = RunStatus.PARTIAL
             else:
                 status = RunStatus.SUCCESS
             self._finish_run(
                 run_id,
                 status,
-                "; ".join(discovery_errors) or None,
+                "; ".join(
+                    [
+                        *discovery_errors,
+                        *([f"{warnings} repositories had warnings"] if warnings else []),
+                    ]
+                )
+                or None,
                 discovered_owned=counts[RepositoryKind.OWNED],
                 discovered_starred=counts[RepositoryKind.STARRED],
                 succeeded=succeeded,
@@ -190,6 +203,7 @@ class SyncService:
                 repository.status = RepositoryStatus.SYNCING.value
                 repository.last_sync_attempt_at = utcnow()
                 repository.last_error = None
+                repository.last_warning = None
                 session.commit()
                 full_name = repository.upstream_full_name
                 github_id = repository.github_id
@@ -242,6 +256,10 @@ class SyncService:
                             "Skipped enabled but empty wiki for GitHub repository %s",
                             upstream.full_name,
                         )
+                release_warnings = await self.release_mirror.mirror(
+                    upstream.full_name, namespace, destination
+                )
+                warning_message = self._warning_message(release_warnings)
                 now = utcnow()
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)
@@ -249,6 +267,7 @@ class SyncService:
                     repository.destination_url = destination_repo.html_url
                     repository.last_successful_sync_at = now
                     repository.last_error = None
+                    repository.last_warning = warning_message
                     repository.status = (
                         previous_status
                         if previous_status
@@ -259,7 +278,18 @@ class SyncService:
                         and trigger != "global"
                         else RepositoryStatus.ACTIVE.value
                     )
-                self._finish_run(run_id, RunStatus.SUCCESS, None, succeeded=1)
+                self._finish_run(
+                    run_id,
+                    RunStatus.PARTIAL if warning_message else RunStatus.SUCCESS,
+                    warning_message,
+                    succeeded=1,
+                )
+                if warning_message:
+                    logger.warning(
+                        "Repository %d synchronization completed with warnings: %s",
+                        repository_id,
+                        warning_message,
+                    )
                 return True
             except Exception as exc:
                 message = redact(
@@ -279,6 +309,15 @@ class SyncService:
                 self._finish_run(run_id, RunStatus.FAILED, message, failed=1)
                 logger.error("Repository %d synchronization failed: %s", repository_id, message)
                 return False
+
+    @staticmethod
+    def _warning_message(warnings: list[str]) -> str | None:
+        if not warnings:
+            return None
+        message = "; ".join(warnings)
+        if len(message) <= 4000:
+            return message
+        return f"{message[:3950].rstrip()}; warning list truncated"
 
     def status(self, next_sync: datetime | None = None) -> dict[str, Any]:
         with self.database.session_factory() as session:

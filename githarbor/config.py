@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     git_lfs_enabled: bool = True
     git_timeout_seconds: int = Field(default=3600, ge=30)
     api_timeout_seconds: int = Field(default=30, ge=5)
+    release_asset_timeout_seconds: int = Field(default=3600, ge=30)
     log_level: str = "INFO"
 
     @field_validator("sync_interval", mode="before")

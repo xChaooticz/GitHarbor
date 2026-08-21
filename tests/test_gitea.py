@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 
 from githarbor.clients.gitea import (
+    AttachmentSettings,
     DestinationRepository,
     DestinationSafetyError,
+    GiteaAssetTooLarge,
     GiteaClient,
     management_marker,
 )
@@ -39,6 +43,43 @@ async def test_enable_wiki_updates_repository_unit() -> None:
         base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
     )
     await client.enable_wiki("archive", "project")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_attachment_settings_convert_mebibytes() -> None:
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"enabled": True, "allowed_types": "*/*", "max_size": 25, "max_files": 5},
+            )
+        ),
+    )
+    settings = await client.attachment_settings()
+    await client.close()
+
+    assert settings == AttachmentSettings(True, "*/*", 25, 5)
+    assert settings.max_size_bytes == 25 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_release_asset_upload_translates_http_413(tmp_path: Path) -> None:
+    path = tmp_path / "asset.zip"
+    path.write_bytes(b"contents")
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/",
+        transport=httpx.MockTransport(lambda request: httpx.Response(413)),
+    )
+    with pytest.raises(GiteaAssetTooLarge, match="413"):
+        await client.upload_release_asset(
+            "archive", "project", 1, "asset.zip", "application/zip", path
+        )
     await client.close()
 
 

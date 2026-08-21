@@ -38,11 +38,13 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             settings.github_token.get_secret_value(),
             settings.github_username,
             settings.api_timeout_seconds,
+            settings.release_asset_timeout_seconds,
         )
         gitea = GiteaClient(
             settings.gitea_api_base,
             settings.gitea_token.get_secret_value(),
             settings.api_timeout_seconds,
+            settings.release_asset_timeout_seconds,
         )
         service = SyncService(
             settings,

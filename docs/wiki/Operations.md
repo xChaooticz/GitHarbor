@@ -13,7 +13,8 @@ curl --fail http://127.0.0.1:8000/api/health
 
 The dashboard shows the last global run, connection state, repository status counts, and individual
 run history. Investigate repositories in `error`; `unavailable` and `unstarred` are preservation
-states and do not mean that the Gitea copy was deleted.
+states and do not mean that the Gitea copy was deleted. A `partial` run with **Last warning** means
+the core mirror succeeded but one or more release assets were safely skipped.
 
 Logs are structured JSON and redact known token patterns. Still protect logs as operational data:
 repository names and failure details may be sensitive.
@@ -29,7 +30,7 @@ curl --fail -X POST http://127.0.0.1:8000/api/sync
 An accepted request returns HTTP `202`. A concurrent global or per-repository run returns `409`
 instead of starting duplicate work. A failed repository can also be retried from its detail page.
 
-These mutation endpoints have no built-in authentication in v0.1. Keep the loopback port binding or
+These mutation endpoints have no built-in authentication. Keep the loopback port binding or
 put the service behind an authenticated proxy.
 
 ## Backups
@@ -79,7 +80,7 @@ then back up the volume and deploy a specific release tag:
 
 ```sh
 git fetch --tags
-git checkout v0.1.1
+git checkout v0.3.0
 docker compose build --pull githarbor
 docker compose up -d --no-deps githarbor
 docker compose logs --tail 100 githarbor
@@ -130,6 +131,17 @@ git -C wiki-restore-test log --oneline --all
 
 Repositories with the GitHub wiki feature disabled, or enabled without any pages, are intentionally
 skipped. A populated wiki that cannot be cloned or pushed makes the repository sync fail visibly.
+
+## Verify release preservation
+
+Open the **Releases** page of a managed Gitea repository and compare its tag, title, body,
+draft/prerelease state, and downloadable assets with GitHub. GitHarbor processes assets one at a
+time and validates their byte count; when GitHub supplies a SHA-256 digest, it validates that too.
+
+If an asset cannot be transferred, the repository remains `active`, its run is `partial`, and the
+repository detail page shows **Last warning**. Correct the Gitea attachment setting, reverse-proxy
+body-size limit, storage capacity, permissions, or timeout, then retry the repository. Later syncs
+retry skipped assets automatically.
 
 ## Disaster recovery order
 

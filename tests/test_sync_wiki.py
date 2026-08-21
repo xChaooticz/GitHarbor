@@ -11,7 +11,7 @@ from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
 from githarbor.config import Settings
 from githarbor.database import Database
-from githarbor.models import Base, Repository, RepositoryStatus
+from githarbor.models import Base, Repository, RepositoryStatus, RunStatus
 from githarbor.services.sync import SyncService
 
 
@@ -21,6 +21,9 @@ class FakeGitHub:
 
     async def get_repository(self, _full_name: str) -> UpstreamRepository:
         return self.upstream
+
+    async def list_releases(self, _full_name: str) -> list[Any]:
+        return []
 
 
 class RecordingGitea:
@@ -41,6 +44,12 @@ class RecordingGitea:
     async def enable_wiki(self, namespace: str, name: str) -> None:
         self.enabled_wikis.append((namespace, name))
 
+    async def list_releases(self, _namespace: str, _name: str) -> list[Any]:
+        return []
+
+    async def attachment_settings(self) -> None:
+        return None
+
 
 class RecordingGit:
     def __init__(self, wiki_has_refs: bool) -> None:
@@ -56,6 +65,11 @@ class RecordingGit:
 
     async def mirror_wiki(self, **kwargs: Any) -> None:
         self.wiki_mirrors.append(kwargs)
+
+
+class WarningReleaseMirror:
+    async def mirror(self, _source: str, _namespace: str, _name: str) -> list[str]:
+        return ["release 'v1.0.0' asset 'large.iso' skipped: HTTP 413"]
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -117,3 +131,48 @@ async def test_sync_mirrors_only_populated_wikis(
     else:
         assert gitea.enabled_wikis == []
         assert git.wiki_mirrors == []
+
+
+@pytest.mark.asyncio
+async def test_release_asset_warning_is_persisted_as_partial_run(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="project",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    service = SyncService(
+        make_settings(tmp_path),
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        RecordingGitea(),  # type: ignore[arg-type]
+        RecordingGit(False),  # type: ignore[arg-type]
+    )
+    service.release_mirror = WarningReleaseMirror()  # type: ignore[assignment]
+
+    assert await service.sync_repository(repository_id, "test") is True
+    with database.session_factory() as session:
+        repository = session.get(Repository, repository_id)
+        assert repository is not None
+        assert "large.iso" in (repository.last_warning or "")
+        assert repository.status == RepositoryStatus.ACTIVE.value
+        assert len(repository.runs) == 1
+        assert repository.runs[0].status == RunStatus.PARTIAL.value

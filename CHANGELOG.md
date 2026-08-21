@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-21
+
+### Added
+
+- Continuous GitHub release metadata and native Gitea release-asset mirroring.
+- Gitea attachment-limit discovery, one-file-at-a-time streaming, exact byte-count and optional
+  SHA-256 validation, and a configurable transfer timeout.
+- Durable hidden ownership metadata for idempotent release updates and guarded asset reconciliation.
+- Persistent per-repository warnings and partial run status for assets that are oversized, disabled,
+  incomplete, rejected, or otherwise unable to transfer.
+
+### Changed
+
+- Release asset failures no longer hide successful Git, LFS, wiki, or release-metadata preservation;
+  they remain visible and are retried on later syncs.
+- Unmanaged same-tag releases and externally changed managed assets are preserved instead of being
+  overwritten or deleted.
+
 ## [0.2.0] - 2026-08-21
 
 ### Added
@@ -62,7 +80,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/xChaooticz/GitHarbor/releases/tag/v0.1.0

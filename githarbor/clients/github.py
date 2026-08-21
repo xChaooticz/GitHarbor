@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -12,6 +14,63 @@ import httpx
 
 class GitHubError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubReleaseAsset:
+    github_id: int
+    api_url: str
+    name: str
+    label: str | None
+    state: str
+    content_type: str
+    size: int
+    digest: str | None
+
+    @classmethod
+    def from_github(cls, data: dict[str, Any]) -> GitHubReleaseAsset:
+        return cls(
+            github_id=int(data["id"]),
+            api_url=str(data["url"]),
+            name=str(data["name"]),
+            label=str(data["label"]) if data.get("label") else None,
+            state=str(data.get("state") or "uploaded"),
+            content_type=str(data.get("content_type") or "application/octet-stream"),
+            size=int(data.get("size") or 0),
+            digest=str(data["digest"]) if data.get("digest") else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubRelease:
+    github_id: int
+    html_url: str
+    tag_name: str
+    target_commitish: str
+    name: str
+    body: str
+    draft: bool
+    prerelease: bool
+    assets: tuple[GitHubReleaseAsset, ...]
+
+    @classmethod
+    def from_github(cls, data: dict[str, Any]) -> GitHubRelease:
+        assets = data.get("assets")
+        return cls(
+            github_id=int(data["id"]),
+            html_url=str(data["html_url"]),
+            tag_name=str(data["tag_name"]),
+            target_commitish=str(data.get("target_commitish") or ""),
+            name=str(data.get("name") or data["tag_name"]),
+            body=str(data.get("body") or ""),
+            draft=bool(data.get("draft", False)),
+            prerelease=bool(data.get("prerelease", False)),
+            assets=tuple(
+                GitHubReleaseAsset.from_github(item)
+                for item in assets or []
+                if isinstance(item, dict)
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,8 +113,16 @@ class UpstreamRepository:
 
 
 class GitHubClient:
-    def __init__(self, api_base: str, token: str, username: str, timeout: int = 30) -> None:
+    def __init__(
+        self,
+        api_base: str,
+        token: str,
+        username: str,
+        timeout: int = 30,
+        asset_timeout: int = 3600,
+    ) -> None:
         self.username = username
+        self._asset_timeout = asset_timeout
         self._client = httpx.AsyncClient(
             base_url=f"{api_base.rstrip('/')}/",
             timeout=timeout,
@@ -104,6 +171,58 @@ class GitHubClient:
         if not isinstance(data, dict):
             raise GitHubError("GitHub returned an invalid repository response")
         return UpstreamRepository.from_github(data)
+
+    async def list_releases(self, full_name: str) -> list[GitHubRelease]:
+        if full_name.count("/") != 1:
+            raise GitHubError("Invalid GitHub repository name")
+        payloads = await self._paginate(f"repos/{full_name}/releases")
+        return [GitHubRelease.from_github(item) for item in payloads]
+
+    async def download_release_asset(self, asset: GitHubReleaseAsset, destination: Path) -> None:
+        for attempt in range(3):
+            try:
+                async with self._client.stream(
+                    "GET",
+                    asset.api_url,
+                    headers={"Accept": "application/octet-stream"},
+                    follow_redirects=True,
+                    timeout=self._asset_timeout,
+                ) as response:
+                    if response.status_code in {502, 503, 504} and attempt < 2:
+                        continue
+                    if response.is_error:
+                        raise GitHubError(
+                            f"GitHub asset download returned HTTP {response.status_code}"
+                        )
+                    digest = hashlib.sha256()
+                    downloaded = 0
+                    with destination.open("wb") as handle:
+                        async for chunk in response.aiter_bytes():
+                            downloaded += len(chunk)
+                            if downloaded > asset.size:
+                                raise GitHubError(
+                                    f"GitHub asset {asset.name!r} exceeded its declared size"
+                                )
+                            handle.write(chunk)
+                            digest.update(chunk)
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise GitHubError(
+                        f"GitHub asset download failed: {exc.__class__.__name__}"
+                    ) from exc
+                await asyncio.sleep(2**attempt)
+                continue
+            if downloaded != asset.size:
+                raise GitHubError(
+                    f"GitHub asset {asset.name!r} downloaded {downloaded} bytes; "
+                    f"expected {asset.size}"
+                )
+            if asset.digest and asset.digest.startswith("sha256:"):
+                expected_digest = asset.digest.removeprefix("sha256:").casefold()
+                if digest.hexdigest().casefold() != expected_digest:
+                    raise GitHubError(f"GitHub asset {asset.name!r} failed SHA-256 verification")
+            return
+        raise AssertionError("unreachable")
 
     async def _paginate(
         self, path: str, params: dict[str, str] | None = None

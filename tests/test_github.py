@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -92,3 +94,55 @@ async def test_owned_discovery_rejects_token_user_mismatch() -> None:
 
 def test_fixture_is_json_serializable() -> None:
     json.dumps(payload(1, "a", "b"))
+
+
+@pytest.mark.asyncio
+async def test_release_listing_and_verified_asset_download(tmp_path: Path) -> None:
+    content = b"release asset contents"
+    digest = hashlib.sha256(content).hexdigest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octocat/project/releases":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": 10,
+                        "html_url": "https://github.test/octocat/project/releases/tag/v1",
+                        "tag_name": "v1",
+                        "target_commitish": "main",
+                        "name": "Version 1",
+                        "body": "Notes",
+                        "draft": False,
+                        "prerelease": False,
+                        "assets": [
+                            {
+                                "id": 20,
+                                "url": "https://api.github.test/assets/20",
+                                "name": "project.zip",
+                                "state": "uploaded",
+                                "content_type": "application/zip",
+                                "size": len(content),
+                                "digest": f"sha256:{digest}",
+                            }
+                        ],
+                    }
+                ],
+            )
+        if request.url.path == "/assets/20":
+            assert request.headers["accept"] == "application/octet-stream"
+            return httpx.Response(200, content=content)
+        return httpx.Response(404)
+
+    client = GitHubClient("https://api.github.test", "secret", "octocat")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://api.github.test/", transport=httpx.MockTransport(handler)
+    )
+    releases = await client.list_releases("octocat/project")
+    destination = tmp_path / "asset"
+    await client.download_release_asset(releases[0].assets[0], destination)
+    await client.close()
+
+    assert releases[0].tag_name == "v1"
+    assert destination.read_bytes() == content

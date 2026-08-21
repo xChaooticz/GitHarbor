@@ -32,7 +32,7 @@ Why these permissions are needed:
 | Permission | GitHarbor use |
 |---|---|
 | Metadata: read | List owned repositories and read repository identity/clone metadata |
-| Contents: read | Clone private Git data and download reachable Git LFS objects |
+| Contents: read | Clone private Git/LFS data and read releases and release assets |
 | Starring: read | List the authenticated account's starred repositories |
 
 GitHub's endpoint documentation confirms that listing authenticated repositories needs
@@ -93,7 +93,7 @@ These permissions cover exactly what the organization configuration uses:
 |---|---|
 | `read:user` | Verify the token account through `/api/v1/user` |
 | `write:organization` | Inspect the organizations and create repositories inside them |
-| `write:repository` | Inspect repositories, push mirrored Git refs, and upload LFS objects |
+| `write:repository` | Push Git/LFS data and create releases and release attachments |
 
 In Gitea, a write scope includes read access to the same category. The token's scopes do not replace
 normal Gitea membership: the account must still have permission to create and push repositories in

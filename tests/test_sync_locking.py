@@ -22,6 +22,9 @@ class FakeGitHub:
     async def get_repository(self, _full_name: str) -> UpstreamRepository:
         return self.upstream
 
+    async def list_releases(self, _full_name: str) -> list[Any]:
+        return []
+
 
 class PartiallyFailingGitHub:
     async def list_owned(self) -> list[UpstreamRepository]:
@@ -39,6 +42,12 @@ class FakeGitea:
 
     async def authenticated_user(self) -> dict[str, str]:
         return {"login": "gitea-user"}
+
+    async def list_releases(self, _namespace: str, _name: str) -> list[Any]:
+        return []
+
+    async def attachment_settings(self) -> None:
+        return None
 
 
 class BlockingGit:

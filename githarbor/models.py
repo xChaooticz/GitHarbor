@@ -69,6 +69,7 @@ class Repository(Base):
     last_sync_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_successful_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    last_warning: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -95,6 +96,7 @@ class Repository(Base):
             "last_sync_attempt_at": self.last_sync_attempt_at,
             "last_successful_sync_at": self.last_successful_sync_at,
             "last_error": self.last_error,
+            "last_warning": self.last_warning,
             "upstream_private": self.upstream_private,
             "upstream_archived": self.upstream_archived,
             "default_branch": self.default_branch,

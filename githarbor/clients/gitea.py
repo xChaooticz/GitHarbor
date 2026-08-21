@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -14,6 +15,54 @@ class GiteaError(RuntimeError):
 
 class DestinationSafetyError(GiteaError):
     pass
+
+
+class GiteaAssetTooLarge(GiteaError):
+    pass
+
+
+class GiteaAssetUploadError(GiteaError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentSettings:
+    enabled: bool
+    allowed_types: str
+    max_size_mebibytes: int
+    max_files: int
+
+    @property
+    def max_size_bytes(self) -> int | None:
+        if self.max_size_mebibytes <= 0:
+            return None
+        return self.max_size_mebibytes * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class GiteaAttachment:
+    gitea_id: int
+    name: str
+    size: int
+
+    @classmethod
+    def from_gitea(cls, data: dict[str, Any]) -> GiteaAttachment:
+        return cls(gitea_id=int(data["id"]), name=str(data["name"]), size=int(data["size"]))
+
+
+@dataclass(frozen=True, slots=True)
+class GiteaRelease:
+    gitea_id: int
+    tag_name: str
+    body: str
+
+    @classmethod
+    def from_gitea(cls, data: dict[str, Any]) -> GiteaRelease:
+        return cls(
+            gitea_id=int(data["id"]),
+            tag_name=str(data["tag_name"]),
+            body=str(data.get("body") or ""),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +84,10 @@ def management_marker(github_id: int, kind: str) -> str:
 
 
 class GiteaClient:
-    def __init__(self, api_base: str, token: str, timeout: int = 30) -> None:
+    def __init__(
+        self, api_base: str, token: str, timeout: int = 30, asset_timeout: int = 3600
+    ) -> None:
+        self._asset_timeout = asset_timeout
         self._client = httpx.AsyncClient(
             base_url=f"{api_base.rstrip('/')}/",
             timeout=timeout,
@@ -65,6 +117,131 @@ class GiteaClient:
                 f"Gitea did not enable the wiki for {namespace}/{name}; "
                 "check whether the wiki repository unit is globally available"
             )
+
+    async def attachment_settings(self) -> AttachmentSettings | None:
+        response = await self._raw_request("GET", "settings/attachment", allow_not_found=True)
+        if response is None:
+            return None
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise GiteaError("Gitea returned invalid attachment settings")
+        return AttachmentSettings(
+            enabled=bool(payload.get("enabled", True)),
+            allowed_types=str(payload.get("allowed_types") or ""),
+            max_size_mebibytes=int(payload.get("max_size") or 0),
+            max_files=int(payload.get("max_files") or 0),
+        )
+
+    async def list_releases(self, namespace: str, name: str) -> list[GiteaRelease]:
+        releases: list[GiteaRelease] = []
+        page = 1
+        while True:
+            payload = await self._request(
+                "GET",
+                f"repos/{namespace}/{name}/releases",
+                params={"page": str(page), "limit": "50"},
+            )
+            if not isinstance(payload, list):
+                raise GiteaError("Gitea returned an invalid release list")
+            page_releases = [
+                GiteaRelease.from_gitea(item) for item in payload if isinstance(item, dict)
+            ]
+            releases.extend(page_releases)
+            if len(payload) < 50:
+                return releases
+            page += 1
+
+    async def create_release(
+        self, namespace: str, name: str, payload: dict[str, Any]
+    ) -> GiteaRelease:
+        data = await self._request("POST", f"repos/{namespace}/{name}/releases", json=payload)
+        if not isinstance(data, dict):
+            raise GiteaError("Gitea returned an invalid release creation response")
+        return GiteaRelease.from_gitea(data)
+
+    async def update_release(
+        self, namespace: str, name: str, release_id: int, payload: dict[str, Any]
+    ) -> GiteaRelease:
+        data = await self._request(
+            "PATCH", f"repos/{namespace}/{name}/releases/{release_id}", json=payload
+        )
+        if not isinstance(data, dict):
+            raise GiteaError("Gitea returned an invalid release update response")
+        return GiteaRelease.from_gitea(data)
+
+    async def list_release_assets(
+        self, namespace: str, name: str, release_id: int
+    ) -> list[GiteaAttachment]:
+        data = await self._request("GET", f"repos/{namespace}/{name}/releases/{release_id}/assets")
+        if not isinstance(data, list):
+            raise GiteaError("Gitea returned an invalid release attachment list")
+        return [GiteaAttachment.from_gitea(item) for item in data if isinstance(item, dict)]
+
+    async def upload_release_asset(
+        self,
+        namespace: str,
+        name: str,
+        release_id: int,
+        asset_name: str,
+        content_type: str,
+        path: Path,
+    ) -> GiteaAttachment:
+        endpoint = f"repos/{namespace}/{name}/releases/{release_id}/assets"
+        for attempt in range(3):
+            try:
+                with path.open("rb") as handle:
+                    response = await self._client.post(
+                        endpoint,
+                        params={"name": asset_name},
+                        files={"attachment": (asset_name, handle, content_type)},
+                        timeout=self._asset_timeout,
+                    )
+            except httpx.HTTPError as exc:
+                if attempt == 2:
+                    raise GiteaAssetUploadError(
+                        f"Gitea asset upload failed: {exc.__class__.__name__}"
+                    ) from exc
+                await asyncio.sleep(2**attempt)
+                continue
+            if response.status_code in {502, 503, 504} and attempt < 2:
+                await asyncio.sleep(2**attempt)
+                continue
+            if response.status_code == 413:
+                raise GiteaAssetTooLarge("Gitea or its reverse proxy returned HTTP 413")
+            if response.is_error:
+                raise GiteaAssetUploadError(
+                    f"Gitea rejected the release asset with HTTP {response.status_code}"
+                )
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise GiteaAssetUploadError("Gitea returned an invalid asset upload response")
+            return GiteaAttachment.from_gitea(payload)
+        raise AssertionError("unreachable")
+
+    async def rename_release_asset(
+        self,
+        namespace: str,
+        name: str,
+        release_id: int,
+        attachment_id: int,
+        asset_name: str,
+    ) -> GiteaAttachment:
+        payload = await self._request(
+            "PATCH",
+            f"repos/{namespace}/{name}/releases/{release_id}/assets/{attachment_id}",
+            json={"name": asset_name},
+        )
+        if not isinstance(payload, dict):
+            raise GiteaError("Gitea returned an invalid attachment update response")
+        return GiteaAttachment.from_gitea(payload)
+
+    async def delete_release_asset(
+        self, namespace: str, name: str, release_id: int, attachment_id: int
+    ) -> None:
+        await self._empty_request(
+            "DELETE",
+            f"repos/{namespace}/{name}/releases/{release_id}/assets/{attachment_id}",
+        )
 
     async def ensure_repository(
         self,
@@ -133,21 +310,31 @@ class GiteaClient:
             raise GiteaError("Gitea returned an invalid response")
         return payload
 
-    async def _request(self, method: str, path: str, json: dict[str, Any] | None = None) -> Any:
-        response = await self._raw_request(method, path, json=json)
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> Any:
+        response = await self._raw_request(method, path, json=json, params=params)
         assert response is not None
         return response.json()
+
+    async def _empty_request(self, method: str, path: str) -> None:
+        await self._raw_request(method, path)
 
     async def _raw_request(
         self,
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
         allow_not_found: bool = False,
     ) -> httpx.Response | None:
         for attempt in range(3):
             try:
-                response = await self._client.request(method, path, json=json)
+                response = await self._client.request(method, path, json=json, params=params)
             except httpx.HTTPError as exc:
                 if attempt == 2:
                     raise GiteaError(f"Gitea request failed: {exc.__class__.__name__}") from exc

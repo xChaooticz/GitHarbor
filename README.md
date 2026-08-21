@@ -15,16 +15,17 @@
 </p>
 
 GitHarbor continuously discovers repositories owned and starred by one GitHub account and mirrors
-their Git data and populated wikis into separate Gitea namespaces. Its defining rule is
-preservation: a repository that vanishes, becomes inaccessible, is transferred, or is unstarred
-remains in Gitea. GitHarbor records the change in state and never automatically deletes a
-destination repository.
+their Git data, populated wikis, releases, and release assets into separate Gitea namespaces. Its
+defining rule is preservation: a repository that vanishes, becomes inaccessible, is transferred,
+or is unstarred remains in Gitea. GitHarbor records the change in state and never automatically
+deletes a destination repository.
 
 ## Features
 
 - Complete bare Git mirrors: branches, tags, history, notes, and other refs via `git push --mirror`
 - Authenticated Git LFS object preservation across all mirrored refs
 - Native Gitea wiki mirrors with complete GitHub wiki history and empty-wiki detection
+- Native Gitea release metadata and streamed release-asset mirroring with size-limit safeguards
 - Stable GitHub repository IDs for rename/transfer detection
 - Collision-proof starred naming and guarded Gitea ownership markers
 - Independent, paginated owned/starred discovery with transient API retries and rate-limit reporting
@@ -42,7 +43,8 @@ reconciliation service, HTTPX clients speak to GitHub and Gitea, and SQLAlchemy 
 run history in SQLite. Each repository operation clones a bare mirror into an isolated OS temporary
 directory, transfers referenced LFS objects, pushes the refs, and removes the directory. There are no
 persistent working trees. Populated GitHub wikis are mirrored separately through their Git
-repositories into Gitea's native wiki repositories.
+repositories into Gitea's native wiki repositories. Releases and their assets are reconciled after
+the Git push through the GitHub and Gitea APIs.
 
 See [Architecture decisions](docs/architecture.md) for identity, naming, safety, and failure rules.
 
@@ -60,8 +62,8 @@ docker compose logs -f githarbor
 ```
 
 Open <http://127.0.0.1:8000>. Compose binds only to loopback by default. Put GitHarbor behind an
-authenticated HTTPS reverse proxy before exposing it to a LAN or the internet; v0.1 has no built-in
-user authentication.
+authenticated HTTPS reverse proxy before exposing it to a LAN or the internet; GitHarbor has no
+built-in user authentication.
 
 The named volume `githarbor-data` contains SQLite state. Gitea itself stores the preserved Git data.
 Back up both the Gitea installation and this volume.
@@ -116,6 +118,7 @@ child-process environment.
 | `DATABASE_PATH` | `/data/githarbor.db` | Persistent SQLite path |
 | `DESTINATION_PRIVATE` | `true` | Create new Gitea destinations as private |
 | `API_TIMEOUT_SECONDS` | `30` | Per-request API timeout |
+| `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Per release-asset download or upload timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Clone or push timeout per command |
 | `LOG_LEVEL` | `INFO` | JSON log threshold |
@@ -169,6 +172,32 @@ bare mirror push to preserve every wiki commit and ref. Like the primary Git mir
 GitHub wiki authoritative: an upstream wiki force-update or ref deletion is reflected in Gitea.
 GitHub wiki attachments committed into the wiki repository are ordinary Git objects and are
 preserved. A wiki clone or push failure marks that repository synchronization as an error.
+
+## Release and release-asset mirroring
+
+After the Git refs (including release tags) are current, GitHarbor lists GitHub releases and creates
+or updates native Gitea releases. It preserves the tag, title, Markdown body, target commitish,
+draft state, and prerelease state. A hidden marker appended to the Gitea release body records the
+GitHub release ID and managed asset IDs without changing the visible source text. GitHarbor refuses
+to overwrite an existing same-tag Gitea release that lacks this ownership marker.
+
+Assets are downloaded and uploaded one at a time through an isolated temporary file. GitHarbor
+checks the downloaded byte count and verifies GitHub's SHA-256 digest when one is available. It asks
+Gitea's attachment-settings API for the advertised per-file maximum and skips an oversized asset
+before downloading it. Attachments disabled by Gitea, GitHub assets that are not fully uploaded,
+HTTP `413` responses, reverse-proxy or storage rejections, and individual transfer failures are also
+skipped without failing the Git or release-metadata mirror.
+
+Every skipped asset is written to the repository's persistent **Last warning**, and that repository
+run is marked `partial`; the repository itself remains `active` and later syncs retry the asset. A
+reverse proxy can enforce a smaller request limit than Gitea advertises, so a successful proactive
+check cannot guarantee the upload will be accepted. Adjust `RELEASE_ASSET_TIMEOUT_SECONDS` for slow
+large transfers.
+
+For safety, GitHarbor deletes a stale managed asset only when its recorded Gitea ID, name, and size
+still match. Externally changed assets are retained with a warning, and releases absent from the
+current GitHub response are retained. Gitea authorship and creation timestamps, GitHub asset labels,
+and download counts cannot be recreated through the target API.
 
 ## API
 
@@ -225,13 +254,16 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
 - **Large repository timeout:** raise `GIT_TIMEOUT_SECONDS`; temporary space must fit one bare clone.
 - **LFS upload fails:** verify Gitea has `LFS_START_SERVER = true`, the token can write the repository,
   and its LFS storage has enough free space. Git refs are intentionally withheld on LFS failure.
+- **Release asset is skipped:** inspect **Last warning** on the repository page. Compare the asset
+  size with Gitea's attachment limit and any reverse-proxy body-size limit, then retry the sync.
 
 ## Current limitations
 
 - One GitHub identity and one application replica per SQLite database
 - No built-in login/RBAC; use an authenticated reverse proxy
-- No issue, pull request, Actions, discussion, release, release-asset, LFS-lock, or
-  orphaned-LFS-object migration
+- No issue, pull request, Actions, discussion, LFS-lock, or orphaned-LFS-object migration
+- Release authorship/timestamps, asset labels/download counts, and deleted source releases are not
+  reproduced; GitHarbor preserves the last managed release instead
 - In-process locks do not coordinate multiple GitHarbor containers; run one replica
 - Destination repository visibility is applied only at creation
 

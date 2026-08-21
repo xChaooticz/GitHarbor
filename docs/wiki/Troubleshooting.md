@@ -8,7 +8,7 @@ docker compose logs --tail 200 githarbor
 ```
 
 Then open the dashboard and the affected repository's detail page. GitHarbor records the last error
-per repository and keeps global run history in SQLite.
+or release-asset warning per repository and keeps global run history in SQLite.
 
 ## Container exits during startup
 
@@ -118,6 +118,26 @@ After correction, retry the repository and validate by cloning from Gitea, then 
 git lfs pull
 git lfs fsck
 ```
+
+## Release asset is skipped or the run is `partial`
+
+Open the repository detail page and read **Last warning**. GitHarbor keeps the repository `active`
+and marks its run `partial` when Git, LFS, wiki, and release metadata succeeded but an individual
+release asset could not be preserved.
+
+Check all of the following:
+
+1. Release attachments are enabled in Gitea.
+2. The file is no larger than Gitea's configured per-attachment maximum.
+3. A reverse proxy does not enforce a smaller request-body limit than Gitea.
+4. Gitea accepts the asset's file type and has free storage.
+5. The Gitea token can write the destination repository.
+6. `RELEASE_ASSET_TIMEOUT_SECONDS` is long enough for both the download and upload.
+
+GitHarbor queries Gitea's attachment-settings API and skips files that exceed its advertised limit
+before downloading them. That API cannot reveal a stricter reverse-proxy limit, so GitHarbor also
+catches an actual HTTP `413` or other upload rejection, records the warning, continues with the next
+asset, and retries the skipped asset on a later sync.
 
 ## Large repository times out
 

@@ -43,12 +43,26 @@ uses the upstream `has_wiki` capability as a cheap first check, verifies that th
 refs so an enabled but empty wiki can be skipped, enables Gitea's native wiki unit, and mirror-pushes
 the complete wiki history. Wiki repositories do not use the primary repository's LFS transfer path.
 
+Releases are API resources layered on top of the mirrored tags. After Git and wiki work succeeds,
+GitHarbor reconciles GitHub release metadata and assets into native Gitea releases. A hidden,
+machine-readable marker in each managed release body stores the stable GitHub release ID and asset
+mapping while leaving the visible source body intact. An unmarked same-tag release is treated as
+user-owned and is never overwritten. Managed assets are streamed through one isolated temporary
+file at a time, checked against Gitea's advertised attachment limit, validated by byte count and an
+available GitHub SHA-256 digest, and uploaded through the Gitea API. Stale assets are removed only
+when their recorded ID, name, and size still match; ambiguity preserves data and emits a warning.
+
+Asset failures are partial rather than destructive failures. The successful Git, LFS, wiki, and
+release metadata remain current, the repository remains active, and a durable warning identifies
+each skipped asset for retry. Releases missing from a GitHub listing are retained because token
+visibility—especially for drafts—may be incomplete and preservation is safer than deletion.
+
 ## Concurrency and recovery
 
 One in-process lock covers global discovery; one lock per database repository ID protects temporary
 mirror work. Run rows are written before work starts. On process restart, lingering `running` runs
 and `syncing` repositories become explicit failures and can be retried. SQLite uses WAL, foreign
-keys, and a busy timeout. A single application replica is a deliberate v0.1 constraint.
+keys, and a busy timeout. A single application replica is a deliberate constraint.
 
 ## Scheduling
 
