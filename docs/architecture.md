@@ -57,6 +57,14 @@ release metadata remain current, the repository remains active, and a durable wa
 each skipped asset for retry. Releases missing from a GitHub listing are retained because token
 visibility—especially for drafts—may be incomplete and preservation is safer than deletion.
 
+Optional mirror layers are controlled independently. Disabling wiki, release, or release-asset
+mirroring performs no cleanup, so previously preserved data remains in Gitea. In `latest` asset mode,
+GitHarbor asks GitHub for the latest published non-draft, non-prerelease release. All visible release
+metadata is still reconciled, but safely managed assets on every other release are treated as stale.
+Cleanup begins only after the latest release's complete asset set succeeds, so a failed new upload
+cannot discard the previous fallback. This explicit retention mode is the only feature-switch path
+that deletes existing assets.
+
 ## Concurrency and recovery
 
 One in-process lock covers global discovery; one lock per database repository ID protects temporary

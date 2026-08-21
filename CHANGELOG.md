@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-21
+
+### Added
+
+- Independent `WIKI_ENABLED`, `RELEASES_ENABLED`, and `RELEASE_ASSETS_ENABLED` switches, all enabled
+  by default to preserve existing behavior.
+- `RELEASE_ASSET_MODE=all|latest` retention control. `latest` uses GitHub's latest published stable
+  release and removes safely managed assets from older releases when the latest release changes.
+
+### Changed
+
+- Disabling an optional mirror layer now skips it without deleting data already preserved in Gitea.
+- Release metadata remains mirrored for all visible releases when asset retention is set to `latest`.
+
 ## [0.3.0] - 2026-08-21
 
 ### Added
@@ -80,7 +94,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.0...v0.1.1

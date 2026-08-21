@@ -6,7 +6,7 @@ import json
 import re
 import tempfile
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from githarbor.clients.gitea import (
     GiteaRelease,
 )
 from githarbor.clients.github import GitHubClient, GitHubError, GitHubRelease, GitHubReleaseAsset
+from githarbor.config import ReleaseAssetMode
 
 _MARKER_PATTERN = re.compile(r"<!-- githarbor-release:([A-Za-z0-9_-]+) -->\s*$")
 
@@ -114,11 +115,42 @@ class ReleaseMirrorService:
         self.github = github
         self.gitea = gitea
 
-    async def mirror(self, source_full_name: str, namespace: str, name: str) -> list[str]:
+    async def mirror(
+        self,
+        source_full_name: str,
+        namespace: str,
+        name: str,
+        *,
+        mirror_assets: bool = True,
+        asset_mode: ReleaseAssetMode = ReleaseAssetMode.ALL,
+    ) -> list[str]:
         source_releases = await self.github.list_releases(source_full_name)
         destination_releases = await self.gitea.list_releases(namespace, name)
-        attachment_settings = await self.gitea.attachment_settings()
+        attachment_settings = await self.gitea.attachment_settings() if mirror_assets else None
         warnings: list[str] = []
+
+        latest_release_id: int | None = None
+        if mirror_assets and asset_mode is ReleaseAssetMode.LATEST:
+            latest_release = await self.github.get_latest_release(source_full_name)
+            latest_release_id = latest_release.github_id if latest_release is not None else None
+            if latest_release_id is not None and all(
+                release.github_id != latest_release_id for release in source_releases
+            ):
+                raise GitHubError("GitHub's latest release was absent from its release listing")
+            if latest_release_id is None and any(
+                not release.draft and not release.prerelease for release in source_releases
+            ):
+                raise GitHubError(
+                    "GitHub's latest release endpoint omitted a listed stable release"
+                )
+
+        ordered_releases = source_releases
+        latest_assets_ready = True
+        if latest_release_id is not None:
+            ordered_releases = sorted(
+                source_releases, key=lambda release: release.github_id != latest_release_id
+            )
+            latest_assets_ready = False
 
         managed: dict[int, tuple[GiteaRelease, ReleaseMarker]] = {}
         by_tag = {release.tag_name: release for release in destination_releases}
@@ -127,7 +159,7 @@ class ReleaseMirrorService:
             if marker is not None:
                 managed[marker.github_id] = (release, marker)
 
-        for source in source_releases:
+        for source in ordered_releases:
             managed_release = managed.get(source.github_id)
             if managed_release is None:
                 collision = by_tag.get(source.tag_name)
@@ -150,8 +182,22 @@ class ReleaseMirrorService:
                     self._release_payload(source, marker),
                 )
 
+            if not mirror_assets:
+                continue
+
+            if (
+                asset_mode is ReleaseAssetMode.LATEST
+                and source.github_id != latest_release_id
+                and not latest_assets_ready
+            ):
+                continue
+
+            asset_source = source
+            if asset_mode is ReleaseAssetMode.LATEST and source.github_id != latest_release_id:
+                asset_source = replace(source, assets=())
+
             updated_assets, asset_warnings = await self._mirror_assets(
-                source,
+                asset_source,
                 destination,
                 marker.assets,
                 attachment_settings,
@@ -159,6 +205,8 @@ class ReleaseMirrorService:
                 name,
             )
             warnings.extend(asset_warnings)
+            if source.github_id == latest_release_id:
+                latest_assets_ready = not asset_warnings
             final_marker = ReleaseMarker(source.github_id, updated_assets)
             await self.gitea.update_release(
                 namespace,

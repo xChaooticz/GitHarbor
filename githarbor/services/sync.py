@@ -236,7 +236,7 @@ class SyncService:
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
                 )
-                if upstream.has_wiki:
+                if self.settings.wiki_enabled and upstream.has_wiki:
                     has_wiki_content = await self.git.remote_has_refs(
                         upstream.wiki_clone_url,
                         self.settings.github_token.get_secret_value(),
@@ -256,9 +256,15 @@ class SyncService:
                             "Skipped enabled but empty wiki for GitHub repository %s",
                             upstream.full_name,
                         )
-                release_warnings = await self.release_mirror.mirror(
-                    upstream.full_name, namespace, destination
-                )
+                release_warnings: list[str] = []
+                if self.settings.releases_enabled:
+                    release_warnings = await self.release_mirror.mirror(
+                        upstream.full_name,
+                        namespace,
+                        destination,
+                        mirror_assets=self.settings.release_assets_enabled,
+                        asset_mode=self.settings.release_asset_mode,
+                    )
                 warning_message = self._warning_message(release_warnings)
                 now = utcnow()
                 with self.database.session_factory.begin() as session:

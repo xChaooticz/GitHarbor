@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from githarbor.config import Settings, parse_interval
+from githarbor.config import ReleaseAssetMode, Settings, parse_interval
 
 
 def settings_values(tmp_path: Path) -> dict[str, object]:
@@ -36,8 +36,31 @@ def test_rejects_invalid_interval(value: str | int) -> None:
 def test_settings_validate_and_hide_tokens(tmp_path: Path) -> None:
     settings = Settings(**settings_values(tmp_path), sync_interval="45m")  # type: ignore[arg-type]
     assert settings.sync_interval == 2700
+    assert settings.wiki_enabled is True
+    assert settings.releases_enabled is True
+    assert settings.release_assets_enabled is True
+    assert settings.release_asset_mode is ReleaseAssetMode.ALL
     assert settings.database_url.endswith("state.db")
     assert "github-secret" not in repr(settings)
+
+
+def test_settings_accept_feature_flags_and_latest_asset_mode(tmp_path: Path) -> None:
+    settings = Settings(
+        **settings_values(tmp_path),
+        wiki_enabled=False,
+        releases_enabled=False,
+        release_assets_enabled=False,
+        release_asset_mode="LATEST",
+    )  # type: ignore[arg-type]
+    assert settings.wiki_enabled is False
+    assert settings.releases_enabled is False
+    assert settings.release_assets_enabled is False
+    assert settings.release_asset_mode is ReleaseAssetMode.LATEST
+
+
+def test_settings_reject_invalid_release_asset_mode(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**settings_values(tmp_path), release_asset_mode="newest-three")  # type: ignore[arg-type]
 
 
 def test_settings_require_tokens(tmp_path: Path) -> None:

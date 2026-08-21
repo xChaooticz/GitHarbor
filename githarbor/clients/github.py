@@ -178,6 +178,19 @@ class GitHubClient:
         payloads = await self._paginate(f"repos/{full_name}/releases")
         return [GitHubRelease.from_github(item) for item in payloads]
 
+    async def get_latest_release(self, full_name: str) -> GitHubRelease | None:
+        if full_name.count("/") != 1:
+            raise GitHubError("Invalid GitHub repository name")
+        response = await self._raw_request(
+            "GET", f"repos/{full_name}/releases/latest", allow_not_found=True
+        )
+        if response.status_code == 404:
+            return None
+        data = response.json()
+        if not isinstance(data, dict):
+            raise GitHubError("GitHub returned an invalid latest release response")
+        return GitHubRelease.from_github(data)
+
     async def download_release_asset(self, asset: GitHubReleaseAsset, destination: Path) -> None:
         for attempt in range(3):
             try:
@@ -251,7 +264,11 @@ class GitHubClient:
         return (await self._raw_request(method, path)).json()
 
     async def _raw_request(
-        self, method: str, path: str, params: dict[str, str] | None = None
+        self,
+        method: str,
+        path: str,
+        params: dict[str, str] | None = None,
+        allow_not_found: bool = False,
     ) -> httpx.Response:
         for attempt in range(3):
             try:
@@ -264,6 +281,8 @@ class GitHubClient:
             if response.status_code in {502, 503, 504} and attempt < 2:
                 await asyncio.sleep(2**attempt)
                 continue
+            if allow_not_found and response.status_code == 404:
+                return response
             if response.is_error:
                 reset = response.headers.get("x-ratelimit-reset")
                 rate_note = ""

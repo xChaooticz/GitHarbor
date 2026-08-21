@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.3.0
+git checkout v0.4.0
 ```
 
 ## 3. Prepare Gitea
@@ -103,6 +103,10 @@ SYNC_ON_STARTUP=true
 DATABASE_PATH=/data/githarbor.db
 DESTINATION_PRIVATE=true
 API_TIMEOUT_SECONDS=30
+WIKI_ENABLED=true
+RELEASES_ENABLED=true
+RELEASE_ASSETS_ENABLED=true
+RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600

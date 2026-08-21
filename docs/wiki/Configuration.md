@@ -31,6 +31,10 @@ before filling in token values.
 | `DATABASE_PATH` | `/data/githarbor.db` | SQLite inventory and run-history path |
 | `DESTINATION_PRIVATE` | `true` | Make newly created Gitea repositories private |
 | `API_TIMEOUT_SECONDS` | `30` | Timeout for one GitHub or Gitea API request; minimum 5 |
+| `WIKI_ENABLED` | `true` | Detect and mirror populated GitHub wikis |
+| `RELEASES_ENABLED` | `true` | Create and update native Gitea releases |
+| `RELEASE_ASSETS_ENABLED` | `true` | Reconcile attachments for mirrored releases |
+| `RELEASE_ASSET_MODE` | `all` | Keep assets for `all` releases or only the `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Timeout for each asset download or upload; minimum 30 |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload reachable LFS objects before pushing refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Timeout for each Git or Git LFS command; minimum 30 |
@@ -53,6 +57,10 @@ SYNC_ON_STARTUP=true
 DATABASE_PATH=/data/githarbor.db
 DESTINATION_PRIVATE=true
 API_TIMEOUT_SECONDS=30
+WIKI_ENABLED=true
+RELEASES_ENABLED=true
+RELEASE_ASSETS_ENABLED=true
+RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
@@ -82,6 +90,25 @@ the previous destination refs intact and marks that repository as an error.
 
 Set it to `false` only if pointer-only mirrors are intentional. Gitea's LFS server must be enabled;
 see [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Organizations#lfs-prerequisite).
+
+## Optional mirror layers
+
+The primary Git mirror is always enabled. `WIKI_ENABLED`, `RELEASES_ENABLED`, and
+`RELEASE_ASSETS_ENABLED` control the optional layers independently. All default to `true`.
+
+- `WIKI_ENABLED=false` skips wiki detection and mirroring.
+- `RELEASES_ENABLED=false` skips release metadata and release assets.
+- `RELEASE_ASSETS_ENABLED=false` keeps release metadata current but skips attachment reconciliation.
+
+Disabling a layer does not remove data already preserved in Gitea. If releases are disabled, the
+release-assets setting and asset mode have no effect.
+
+`RELEASE_ASSET_MODE=all` keeps assets on every visible release. Set it to `latest` to keep assets
+only on GitHub's latest published stable release while continuing to mirror metadata for every
+visible release. GitHub excludes drafts and prereleases from “latest.” When GitHub selects a new
+latest release, GitHarbor uploads its assets and safely deletes assets it previously managed from
+older releases. If the new latest asset set has any failure, older assets remain until a later retry
+succeeds. Unmanaged or externally changed Gitea attachments are retained with a warning.
 
 ## Timeouts
 

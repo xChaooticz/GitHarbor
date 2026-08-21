@@ -118,6 +118,10 @@ child-process environment.
 | `DATABASE_PATH` | `/data/githarbor.db` | Persistent SQLite path |
 | `DESTINATION_PRIVATE` | `true` | Create new Gitea destinations as private |
 | `API_TIMEOUT_SECONDS` | `30` | Per-request API timeout |
+| `WIKI_ENABLED` | `true` | Mirror populated GitHub wikis |
+| `RELEASES_ENABLED` | `true` | Mirror GitHub release metadata |
+| `RELEASE_ASSETS_ENABLED` | `true` | Mirror assets when release mirroring is enabled |
+| `RELEASE_ASSET_MODE` | `all` | Asset retention: `all` releases or only `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Per release-asset download or upload timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Clone or push timeout per command |
@@ -172,6 +176,7 @@ bare mirror push to preserve every wiki commit and ref. Like the primary Git mir
 GitHub wiki authoritative: an upstream wiki force-update or ref deletion is reflected in Gitea.
 GitHub wiki attachments committed into the wiki repository are ordinary Git objects and are
 preserved. A wiki clone or push failure marks that repository synchronization as an error.
+Set `WIKI_ENABLED=false` to skip wiki checks and updates. Existing Gitea wiki data is retained.
 
 ## Release and release-asset mirroring
 
@@ -180,6 +185,10 @@ or updates native Gitea releases. It preserves the tag, title, Markdown body, ta
 draft state, and prerelease state. A hidden marker appended to the Gitea release body records the
 GitHub release ID and managed asset IDs without changing the visible source text. GitHarbor refuses
 to overwrite an existing same-tag Gitea release that lacks this ownership marker.
+
+`RELEASES_ENABLED=false` skips both release metadata and assets without deleting existing Gitea
+releases. With releases enabled, `RELEASE_ASSETS_ENABLED=false` continues updating release metadata
+but leaves all existing attachments untouched.
 
 Assets are downloaded and uploaded one at a time through an isolated temporary file. GitHarbor
 checks the downloaded byte count and verifies GitHub's SHA-256 digest when one is available. It asks
@@ -193,6 +202,13 @@ run is marked `partial`; the repository itself remains `active` and later syncs 
 reverse proxy can enforce a smaller request limit than Gitea advertises, so a successful proactive
 check cannot guarantee the upload will be accepted. Adjust `RELEASE_ASSET_TIMEOUT_SECONDS` for slow
 large transfers.
+
+`RELEASE_ASSET_MODE=all` mirrors assets for every visible release. `latest` still mirrors metadata
+for every visible release but retains assets only on GitHub's latest published stable release, as
+reported by GitHub's dedicated latest-release API. Drafts and prereleases are not candidates. When
+the latest release changes, GitHarbor uploads its assets and deletes assets it previously managed
+from older releases. If any new-latest asset fails, older assets are retained until a later retry
+succeeds. Switching back to `all` restores eligible older assets on the next sync.
 
 For safety, GitHarbor deletes a stale managed asset only when its recorded Gitea ID, name, and size
 still match. Externally changed assets are retained with a warning, and releases absent from the

@@ -31,6 +31,10 @@ GitHarbor does not migrate issues, pull requests, Actions, discussions, LFS lock
 that are no longer reachable from a Git ref. Release authorship/timestamps, asset labels/download
 counts, and deleted source releases are not reproduced.
 
+Wiki, release, release-asset, and Git LFS mirroring can be configured independently. Release assets
+can be retained for every release or only GitHub's latest published stable release. Disabling an
+optional layer preserves the Gitea data already mirrored by that layer.
+
 ## Important safety rules
 
 - Run one GitHarbor container per database.

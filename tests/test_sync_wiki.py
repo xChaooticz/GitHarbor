@@ -9,7 +9,7 @@ import pytest
 
 from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
-from githarbor.config import Settings
+from githarbor.config import ReleaseAssetMode, Settings
 from githarbor.database import Database
 from githarbor.models import Base, Repository, RepositoryStatus, RunStatus
 from githarbor.services.sync import SyncService
@@ -55,12 +55,14 @@ class RecordingGit:
     def __init__(self, wiki_has_refs: bool) -> None:
         self.wiki_has_refs = wiki_has_refs
         self.primary_mirrors = 0
+        self.wiki_ref_checks = 0
         self.wiki_mirrors: list[dict[str, Any]] = []
 
     async def mirror(self, **_kwargs: Any) -> None:
         self.primary_mirrors += 1
 
     async def remote_has_refs(self, _source_url: str, _source_token: str) -> bool:
+        self.wiki_ref_checks += 1
         return self.wiki_has_refs
 
     async def mirror_wiki(self, **kwargs: Any) -> None:
@@ -68,8 +70,30 @@ class RecordingGit:
 
 
 class WarningReleaseMirror:
-    async def mirror(self, _source: str, _namespace: str, _name: str) -> list[str]:
+    async def mirror(self, _source: str, _namespace: str, _name: str, **_kwargs: Any) -> list[str]:
         return ["release 'v1.0.0' asset 'large.iso' skipped: HTTP 413"]
+
+
+class ForbiddenReleaseMirror:
+    async def mirror(self, *_args: Any, **_kwargs: Any) -> list[str]:
+        raise AssertionError("release mirroring should be disabled")
+
+
+class RecordingReleaseMirror:
+    def __init__(self) -> None:
+        self.options: tuple[bool, ReleaseAssetMode] | None = None
+
+    async def mirror(
+        self,
+        _source: str,
+        _namespace: str,
+        _name: str,
+        *,
+        mirror_assets: bool,
+        asset_mode: ReleaseAssetMode,
+    ) -> list[str]:
+        self.options = (mirror_assets, asset_mode)
+        return []
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -176,3 +200,98 @@ async def test_release_asset_warning_is_persisted_as_partial_run(
         assert repository.status == RepositoryStatus.ACTIVE.value
         assert len(repository.runs) == 1
         assert repository.runs[0].status == RunStatus.PARTIAL.value
+
+
+@pytest.mark.asyncio
+async def test_disabled_wiki_and_release_features_are_skipped(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    upstream = replace(upstream, has_wiki=True)
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="project",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    settings = make_settings(tmp_path).model_copy(
+        update={"wiki_enabled": False, "releases_enabled": False}
+    )
+    gitea = RecordingGitea()
+    git = RecordingGit(True)
+    service = SyncService(
+        settings,
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        gitea,  # type: ignore[arg-type]
+        git,  # type: ignore[arg-type]
+    )
+    service.release_mirror = ForbiddenReleaseMirror()  # type: ignore[assignment]
+
+    assert await service.sync_repository(repository_id, "test") is True
+    assert git.primary_mirrors == 1
+    assert git.wiki_ref_checks == 0
+    assert git.wiki_mirrors == []
+    assert gitea.enabled_wikis == []
+
+
+@pytest.mark.asyncio
+async def test_release_asset_options_are_passed_to_release_mirroring(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="project",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "wiki_enabled": False,
+            "release_assets_enabled": False,
+            "release_asset_mode": ReleaseAssetMode.LATEST,
+        }
+    )
+    release_mirror = RecordingReleaseMirror()
+    service = SyncService(
+        settings,
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        RecordingGitea(),  # type: ignore[arg-type]
+        RecordingGit(False),  # type: ignore[arg-type]
+    )
+    service.release_mirror = release_mirror  # type: ignore[assignment]
+
+    assert await service.sync_repository(repository_id, "test") is True
+    assert release_mirror.options == (False, ReleaseAssetMode.LATEST)

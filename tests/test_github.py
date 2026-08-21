@@ -146,3 +146,39 @@ async def test_release_listing_and_verified_asset_download(tmp_path: Path) -> No
 
     assert releases[0].tag_name == "v1"
     assert destination.read_bytes() == content
+
+
+@pytest.mark.asyncio
+async def test_latest_release_and_missing_latest_release() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octocat/project/releases/latest":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 11,
+                    "html_url": "https://github.test/octocat/project/releases/tag/v2",
+                    "tag_name": "v2",
+                    "target_commitish": "main",
+                    "name": "Version 2",
+                    "body": "Notes",
+                    "draft": False,
+                    "prerelease": False,
+                    "assets": [],
+                },
+            )
+        if request.url.path == "/repos/octocat/empty/releases/latest":
+            return httpx.Response(404)
+        return httpx.Response(500)
+
+    client = GitHubClient("https://api.github.test", "secret", "octocat")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://api.github.test/", transport=httpx.MockTransport(handler)
+    )
+    latest = await client.get_latest_release("octocat/project")
+    missing = await client.get_latest_release("octocat/empty")
+    await client.close()
+
+    assert latest is not None
+    assert latest.github_id == 11
+    assert missing is None

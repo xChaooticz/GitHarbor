@@ -80,7 +80,7 @@ then back up the volume and deploy a specific release tag:
 
 ```sh
 git fetch --tags
-git checkout v0.3.0
+git checkout v0.4.0
 docker compose build --pull githarbor
 docker compose up -d --no-deps githarbor
 docker compose logs --tail 100 githarbor
@@ -142,6 +142,12 @@ If an asset cannot be transferred, the repository remains `active`, its run is `
 repository detail page shows **Last warning**. Correct the Gitea attachment setting, reverse-proxy
 body-size limit, storage capacity, permissions, or timeout, then retry the repository. Later syncs
 retry skipped assets automatically.
+
+With `RELEASE_ASSET_MODE=latest`, verify that only GitHub's latest published stable release has
+managed attachments. When a newer stable release becomes latest, its assets are uploaded and the
+previous latest release's safely identified managed assets are removed. Draft and prerelease
+metadata is still mirrored, but their assets are not retained in this mode. If the new latest asset
+set is incomplete or fails, the older managed assets remain as a fallback until a retry succeeds.
 
 ## Disaster recovery order
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +9,11 @@ from pydantic import Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INTERVAL = re.compile(r"^(?P<value>[1-9]\d*)\s*(?P<unit>s|m|h|d)?$", re.IGNORECASE)
+
+
+class ReleaseAssetMode(StrEnum):
+    ALL = "all"
+    LATEST = "latest"
 
 
 def parse_interval(value: str | int) -> int:
@@ -38,6 +44,10 @@ class Settings(BaseSettings):
     sync_on_startup: bool = True
     database_path: Path = Path("/data/githarbor.db")
     destination_private: bool = True
+    wiki_enabled: bool = True
+    releases_enabled: bool = True
+    release_assets_enabled: bool = True
+    release_asset_mode: ReleaseAssetMode = ReleaseAssetMode.ALL
     git_lfs_enabled: bool = True
     git_timeout_seconds: int = Field(default=3600, ge=30)
     api_timeout_seconds: int = Field(default=30, ge=5)
@@ -64,6 +74,11 @@ class Settings(BaseSettings):
         if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("LOG_LEVEL is invalid")
         return value
+
+    @field_validator("release_asset_mode", mode="before")
+    @classmethod
+    def validate_release_asset_mode(cls, value: str | ReleaseAssetMode) -> str:
+        return str(value).strip().lower()
 
     @property
     def database_url(self) -> str:
