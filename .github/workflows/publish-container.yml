@@ -55,6 +55,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
+          context: git
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=raw,value=${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.event.release.tag_name }}
@@ -66,6 +67,15 @@ jobs:
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
             org.opencontainers.image.version=${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.event.release.tag_name }}
+          annotations: |
+            org.opencontainers.image.title=GitHarbor
+            org.opencontainers.image.description=Your self-hosted safe harbor for Git repositories.
+            org.opencontainers.image.source=https://github.com/xChaooticz/GitHarbor
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.version=${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.event.release.tag_name }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
       - name: Build and push image
         uses: docker/build-push-action@v7
