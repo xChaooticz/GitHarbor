@@ -42,6 +42,11 @@ RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 COPY --chown=githarbor:githarbor alembic.ini ./
 COPY --chown=githarbor:githarbor alembic ./alembic
 
+LABEL org.opencontainers.image.title="GitHarbor" \
+      org.opencontainers.image.description="Your self-hosted safe harbor for Git repositories." \
+      org.opencontainers.image.source="https://github.com/xChaooticz/GitHarbor" \
+      org.opencontainers.image.licenses="MIT"
+
 USER githarbor
 EXPOSE 8000
 VOLUME ["/data"]

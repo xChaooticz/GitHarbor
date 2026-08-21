@@ -129,13 +129,23 @@ Rules that prevent common startup failures:
 
 See [Configuration](https://github.com/xChaooticz/GitHarbor/wiki/Configuration) for every setting.
 
-## 6. Build and start
+## 6. Pull and start
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 docker compose logs -f githarbor
 ```
+
+The normal command pulls `ghcr.io/xchaooticz/githarbor:latest`. To build from the checked-out
+source instead, add `--build`:
+
+```sh
+docker compose up -d --build
+```
+
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.5.0`.
+If the GHCR package is private, authenticate the Docker host with `docker login ghcr.io` first.
 
 Press `Ctrl+C` to stop following logs; the container continues running. With
 `SYNC_ON_STARTUP=true`, the first discovery starts after application startup. Large accounts and LFS
@@ -143,13 +153,13 @@ repositories may take time because each repository is mirrored independently.
 
 ## 7. Verify the installation
 
-Open <http://127.0.0.1:8000> on the Docker host. You should see GitHub and Gitea connection status,
+Open <http://127.0.0.1:9005> on the Docker host. You should see GitHub and Gitea connection status,
 repository counts, and synchronization results.
 
 You can also check the health endpoint:
 
 ```sh
-curl --fail http://127.0.0.1:8000/api/health
+curl --fail http://127.0.0.1:9005/api/health
 ```
 
 Then verify in Gitea:
@@ -169,7 +179,7 @@ network issue. It is safe to retry; overlapping global runs are rejected.
 
 ## 8. Secure and operate it
 
-Compose binds the dashboard to `127.0.0.1:8000`. Keep that default unless you place GitHarbor behind
+Compose binds the dashboard to `127.0.0.1:9005`. Keep that default unless you place GitHarbor behind
 an authenticated HTTPS reverse proxy or another trusted access layer. GitHarbor has no built-in
 authentication, so anyone who can reach the dashboard can trigger synchronization.
 
