@@ -81,7 +81,7 @@ release and pull it:
 
 ```sh
 docker compose pull githarbor
-docker compose up -d --no-deps githarbor
+docker compose up -d --no-deps --wait --wait-timeout 180 githarbor
 docker compose logs --tail 100 githarbor
 ```
 
@@ -89,12 +89,30 @@ To build a release from source instead:
 
 ```sh
 git fetch --tags
-git checkout v0.5.0
-docker compose up -d --build --no-deps githarbor
+git checkout v0.5.1
+docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 
 GitHarbor applies Alembic database migrations automatically at startup. Do not downgrade across a
 database migration unless the release notes explicitly document a safe downgrade path.
+
+## Verify a NAS installation
+
+Run these commands on the NAS after the first installation and after every upgrade:
+
+```sh
+docker compose pull githarbor
+docker compose up -d --wait --wait-timeout 180
+docker compose ps
+curl --fail http://127.0.0.1:9005/api/health
+docker inspect --format '{{.Architecture}}' githarbor
+```
+
+The service should be `healthy`, the health endpoint should report `status` as `ok`, and the final
+command should show the NAS architecture, normally `amd64` or `arm64`. GitHarbor's published image
+contains both architectures. If startup fails, collect `docker compose logs --tail 200 githarbor`
+before recreating the container. These checks exercise the published image on the actual NAS;
+GitHarbor's CI performs the same Compose startup and health test on an isolated Linux runner.
 
 ## Rotate tokens
 

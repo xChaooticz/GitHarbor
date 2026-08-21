@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,7 +22,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run tests, lint, formatting, and type checks
         run: docker build --target test --tag githarbor:test .
+
+  container:
+    name: Container smoke test and security scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare smoke-test configuration
+        shell: bash
+        run: |
+          cp .env.example .env
+          sed -i 's/^SYNC_ON_STARTUP=.*/SYNC_ON_STARTUP=false/' .env
+
+      - name: Build and start with Docker Compose
+        run: docker compose up --detach --build --wait --wait-timeout 180
+
+      - name: Verify the public health endpoint
+        shell: bash
+        run: |
+          response="$(curl --fail --silent --show-error http://127.0.0.1:9005/api/health)"
+          python -c 'import json, sys; data = json.loads(sys.argv[1]); assert data["status"] == "ok", data' "$response"
+
+      - name: Scan image for fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: ghcr.io/xchaooticz/githarbor:latest
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          hide-progress: true
+          timeout: 10m0s
+
+      - name: Show container logs after a failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop smoke-test services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
