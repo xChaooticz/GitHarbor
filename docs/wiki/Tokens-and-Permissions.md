@@ -66,6 +66,21 @@ Set `GITHUB_API_URL` to the enterprise REST API root, commonly
 use that server's matching GitHub documentation. The token still needs API discovery plus HTTPS Git
 and LFS read access.
 
+## GitHub Packages token
+
+Container package mirroring uses `GITHUB_PACKAGES_TOKEN`, separate from the repository discovery
+token. GitHub Container Registry authentication currently requires a personal access token
+(classic); a fine-grained PAT cannot be used for this registry login.
+
+1. Open **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**.
+2. Choose **Generate new token (classic)** and set an expiration.
+3. Select only `read:packages`.
+4. Authorize the token for organization SSO when the linked package requires it.
+5. Put the value in `GITHUB_PACKAGES_TOKEN` and set `PACKAGES_ENABLED=true`.
+
+The token account must be able to download each package. GitHarbor never publishes, changes, or
+deletes packages on GitHub. Keep package mirroring disabled if a classic token is not acceptable.
+
 ## Gitea token
 
 Use a dedicated Gitea account so the token cannot modify unrelated repositories. Add that account
@@ -84,8 +99,10 @@ token screen, one-time token display, and granular scopes.
    - **repository**: **Read and Write** (`write:repository`)
    - **organization**: **Read and Write** (`write:organization`)
    - **user**: **Read** (`read:user`)
-6. Leave admin, issue, package, notification, and other categories disabled.
-7. Generate the token and copy it immediately. Gitea does not show the full value again.
+6. If `PACKAGES_ENABLED=true`, additionally set **package** to **Read and Write**
+   (`write:package`). Otherwise leave package access disabled.
+7. Leave admin, issue, notification, and other unused categories disabled.
+8. Generate the token and copy it immediately. Gitea does not show the full value again.
 
 These permissions cover exactly what the organization configuration uses:
 
@@ -94,6 +111,7 @@ These permissions cover exactly what the organization configuration uses:
 | `read:user` | Verify the token account through `/api/v1/user` |
 | `write:organization` | Inspect the organizations and create repositories inside them |
 | `write:repository` | Push Git/LFS data and create releases and release attachments |
+| `write:package` | Push, link, inspect, and safely remove managed container versions when enabled |
 
 In Gitea, a write scope includes read access to the same category. The token's scopes do not replace
 normal Gitea membership: the account must still have permission to create and push repositories in
@@ -103,7 +121,8 @@ each organization.
 
 GitHarbor also accepts the authenticated Gitea username as a namespace. If either destination uses
 that personal namespace, grant **user: Read and Write** (`write:user`) instead of `read:user`, plus
-`write:repository`. Repository creation under `/api/v1/user/repos` is a user write operation.
+`write:repository` and, when package mirroring is enabled, `write:package`. Repository creation
+under `/api/v1/user/repos` is a user write operation.
 
 ### Older Gitea versions
 

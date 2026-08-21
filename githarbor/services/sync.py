@@ -19,6 +19,7 @@ from githarbor.models import (
     SyncRun,
     utcnow,
 )
+from githarbor.services.containers import ContainerMirrorService
 from githarbor.services.git import GitMirror
 from githarbor.services.reconciliation import Reconciler
 from githarbor.services.redaction import redact
@@ -35,12 +36,14 @@ class SyncService:
         github: GitHubClient,
         gitea: GiteaClient,
         git: GitMirror,
+        container_mirror: ContainerMirrorService | None = None,
     ) -> None:
         self.settings = settings
         self.database = database
         self.github = github
         self.gitea = gitea
         self.git = git
+        self.container_mirror = container_mirror
         self.release_mirror = ReleaseMirrorService(github, gitea)
         self.reconciler = Reconciler()
         self.global_lock = asyncio.Lock()
@@ -265,7 +268,18 @@ class SyncService:
                         mirror_assets=self.settings.release_assets_enabled,
                         asset_mode=self.settings.release_asset_mode,
                     )
-                warning_message = self._warning_message(release_warnings)
+                package_warnings: list[str] = []
+                if self.settings.packages_enabled and kind == RepositoryKind.OWNED.value:
+                    if self.container_mirror is None:
+                        raise RuntimeError("Container package mirror was not initialized")
+                    package_warnings = await self.container_mirror.mirror(
+                        repository_id,
+                        github_id,
+                        namespace,
+                        destination,
+                        str(user["login"]),
+                    )
+                warning_message = self._warning_message([*release_warnings, *package_warnings])
                 now = utcnow()
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)
@@ -298,12 +312,15 @@ class SyncService:
                     )
                 return True
             except Exception as exc:
+                secrets = [
+                    self.settings.github_token.get_secret_value(),
+                    self.settings.gitea_token.get_secret_value(),
+                ]
+                if self.settings.github_packages_token is not None:
+                    secrets.append(self.settings.github_packages_token.get_secret_value())
                 message = redact(
                     str(exc),
-                    [
-                        self.settings.github_token.get_secret_value(),
-                        self.settings.gitea_token.get_secret_value(),
-                    ],
+                    secrets,
                 )[:4000]
                 if exc.__class__.__module__.endswith("gitea"):
                     self.gitea_status = "error"

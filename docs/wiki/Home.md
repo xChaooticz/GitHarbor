@@ -1,7 +1,8 @@
 # GitHarbor documentation
 
 GitHarbor discovers repositories owned and starred by one GitHub account and preserves their Git
-history, populated wikis, releases, release assets, and reachable Git LFS objects in Gitea. It never
+history, populated wikis, releases, release assets, reachable Git LFS objects, and opt-in container
+packages linked to owned repositories in Gitea. It never
 automatically deletes a destination repository when the source disappears or a star is removed.
 
 ## Start here
@@ -14,7 +15,9 @@ automatically deletes a destination repository when the source disappears or a s
    prepare the two destination namespaces.
 4. Review [Configuration](https://github.com/xChaooticz/GitHarbor/wiki/Configuration) before changing
    the schedule, visibility, database path, timeouts, or LFS behavior.
-5. Keep [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) and
+5. Read [Container packages](https://github.com/xChaooticz/GitHarbor/wiki/Container-Packages) before
+   enabling registry mirroring and choosing its retention mode.
+6. Keep [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) and
    [Troubleshooting](https://github.com/xChaooticz/GitHarbor/wiki/Troubleshooting) nearby after
    deployment.
 
@@ -24,6 +27,7 @@ automatically deletes a destination repository when the source disappears or a s
 - Git LFS objects reachable from mirrored refs when LFS support is enabled
 - Complete commit history for populated GitHub wikis in Gitea's native wiki
 - Native Gitea releases with tag, title, body, target, draft/prerelease state, and transferable assets
+- Multi-platform container images and tags linked to owned repositories when explicitly enabled
 - A stable mapping based on GitHub's numeric repository ID, even after a rename or transfer
 - The last known Gitea copy when a repository becomes inaccessible or is unstarred
 
@@ -31,9 +35,11 @@ GitHarbor does not migrate issues, pull requests, Actions, discussions, LFS lock
 that are no longer reachable from a Git ref. Release authorship/timestamps, asset labels/download
 counts, and deleted source releases are not reproduced.
 
-Wiki, release, release-asset, and Git LFS mirroring can be configured independently. Release assets
-can be retained for every release or only GitHub's latest published stable release. Disabling an
-optional layer preserves the Gitea data already mirrored by that layer.
+Wiki, release, release-asset, container-package, and Git LFS mirroring can be configured
+independently. Release assets can be retained for every release or only GitHub's latest published
+stable release. Containers can retain all discovered image digests or only the digest with the
+literal `latest` tag. Disabling an optional layer preserves the Gitea data already mirrored by that
+layer.
 
 ## Important safety rules
 

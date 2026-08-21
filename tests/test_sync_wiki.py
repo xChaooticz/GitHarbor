@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
@@ -93,6 +94,30 @@ class RecordingReleaseMirror:
         asset_mode: ReleaseAssetMode,
     ) -> list[str]:
         self.options = (mirror_assets, asset_mode)
+        return []
+
+
+class RecordingContainerMirror:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int, str, str, str]] = []
+
+    async def mirror(
+        self,
+        repository_id: int,
+        github_repository_id: int,
+        namespace: str,
+        repository_name: str,
+        destination_username: str,
+    ) -> list[str]:
+        self.calls.append(
+            (
+                repository_id,
+                github_repository_id,
+                namespace,
+                repository_name,
+                destination_username,
+            )
+        )
         return []
 
 
@@ -295,3 +320,64 @@ async def test_release_asset_options_are_passed_to_release_mirroring(
 
     assert await service.sync_repository(repository_id, "test") is True
     assert release_mirror.options == (False, ReleaseAssetMode.LATEST)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "namespace", "expected_calls"),
+    [("owned", "backups", 1), ("starred", "archive", 0)],
+)
+async def test_package_mirroring_runs_only_for_owned_repositories(
+    tmp_path: Path,
+    upstream: UpstreamRepository,
+    kind: str,
+    namespace: str,
+    expected_calls: int,
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind=kind,
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace=namespace,
+            destination_name="project",
+            currently_starred=kind == "starred",
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "packages_enabled": True,
+            "github_packages_token": SecretStr("packages-secret"),
+        }
+    )
+    container_mirror = RecordingContainerMirror()
+    service = SyncService(
+        settings,
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        RecordingGitea(),  # type: ignore[arg-type]
+        RecordingGit(False),  # type: ignore[arg-type]
+        container_mirror,  # type: ignore[arg-type]
+    )
+
+    assert await service.sync_repository(repository_id, "test") is True
+    assert len(container_mirror.calls) == expected_calls
+    if expected_calls:
+        assert container_mirror.calls[0][1:] == (
+            upstream.github_id,
+            "backups",
+            "project",
+            "gitea-user",
+        )

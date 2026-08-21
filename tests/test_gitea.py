@@ -83,6 +83,57 @@ async def test_release_asset_upload_translates_http_413(tmp_path: Path) -> None:
     await client.close()
 
 
+@pytest.mark.asyncio
+async def test_container_package_endpoints_encode_names_and_parse_versions() -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.raw_path.decode()))
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": 41,
+                        "name": "project/image",
+                        "version": "1.0.0",
+                        "type": "container",
+                        "size": 123,
+                        "repository": {"name": "project"},
+                    }
+                ],
+            )
+        return httpx.Response(204)
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+
+    versions = await client.list_container_versions("backup org", "project/image")
+    await client.link_container_package("backup org", "project/image", "destination repo")
+    await client.delete_container_version("backup org", "project/image", "1.0+meta")
+    await client.close()
+
+    assert versions[0].gitea_id == 41
+    assert versions[0].repository_name == "project"
+    assert requests == [
+        (
+            "GET",
+            "/packages/backup%20org/container/project%2Fimage?page=1&limit=50",
+        ),
+        (
+            "POST",
+            "/packages/backup%20org/container/project%2Fimage/-/link/destination%20repo",
+        ),
+        (
+            "DELETE",
+            "/packages/backup%20org/container/project%2Fimage/1.0%2Bmeta",
+        ),
+    ]
+
+
 def test_destination_safety_accepts_matching_marker() -> None:
     GiteaClient._verify_managed(
         {"description": f"{management_marker(123, 'starred')}; source:a/b"},

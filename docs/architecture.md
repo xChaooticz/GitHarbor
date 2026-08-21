@@ -65,6 +65,19 @@ Cleanup begins only after the latest release's complete asset set succeeds, so a
 cannot discard the previous fallback. This explicit retention mode is the only feature-switch path
 that deletes existing assets.
 
+Container packages are owner-level registry resources, so GitHarbor limits discovery to packages
+whose GitHub API metadata links them to an owned repository and links the copied Gitea package back
+to that managed destination. Skopeo copies complete manifest lists directly between registries with
+digest preservation. A SQLite ownership journal is written before external mutation and records
+exact Gitea package-version IDs after verification. Existing unmanaged package names or tags stop
+the transfer; cleanup deletes only exact recorded versions and retains anything externally changed.
+
+In `all` mode, a deterministic digest-derived tag keeps every copied manifest reachable after
+mutable source tags move. In `latest` mode, the literal `latest` digest and all of its companion tags
+are verified before older managed versions are considered stale. Missing or ambiguous `latest`, a
+failed transfer, changed ownership evidence, or another tag referencing an old digest prevents
+cleanup and produces a durable partial-run warning. Disabling package mirroring performs no cleanup.
+
 ## Concurrency and recovery
 
 One in-process lock covers global discovery; one lock per database repository ID protects temporary

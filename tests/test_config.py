@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from githarbor.config import ReleaseAssetMode, Settings, parse_interval
+from githarbor.config import ContainerImageMode, ReleaseAssetMode, Settings, parse_interval
 
 
 def settings_values(tmp_path: Path) -> dict[str, object]:
@@ -40,6 +40,8 @@ def test_settings_validate_and_hide_tokens(tmp_path: Path) -> None:
     assert settings.releases_enabled is True
     assert settings.release_assets_enabled is True
     assert settings.release_asset_mode is ReleaseAssetMode.ALL
+    assert settings.packages_enabled is False
+    assert settings.container_image_mode is ContainerImageMode.ALL
     assert settings.database_url.endswith("state.db")
     assert "github-secret" not in repr(settings)
 
@@ -61,6 +63,31 @@ def test_settings_accept_feature_flags_and_latest_asset_mode(tmp_path: Path) -> 
 def test_settings_reject_invalid_release_asset_mode(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         Settings(**settings_values(tmp_path), release_asset_mode="newest-three")  # type: ignore[arg-type]
+
+
+def test_package_mirroring_requires_classic_package_token(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="GITHUB_PACKAGES_TOKEN"):
+        Settings(**settings_values(tmp_path), packages_enabled=True)  # type: ignore[arg-type]
+
+    settings = Settings(
+        **settings_values(tmp_path),
+        packages_enabled=True,
+        github_packages_token="packages-secret",
+        container_image_mode="LATEST",
+    )  # type: ignore[arg-type]
+    assert settings.container_image_mode is ContainerImageMode.LATEST
+    assert "packages-secret" not in repr(settings)
+
+
+def test_package_mirroring_rejects_gitea_subpath(tmp_path: Path) -> None:
+    values = settings_values(tmp_path)
+    values["gitea_url"] = "https://gitea.example/subpath"
+    with pytest.raises(ValidationError, match="must be an instance root"):
+        Settings(
+            **values,
+            packages_enabled=True,
+            github_packages_token="packages-secret",
+        )  # type: ignore[arg-type]
 
 
 def test_settings_require_tokens(tmp_path: Path) -> None:

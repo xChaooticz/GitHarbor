@@ -139,6 +139,28 @@ before downloading them. That API cannot reveal a stricter reverse-proxy limit, 
 catches an actual HTTP `413` or other upload rejection, records the warning, continues with the next
 asset, and retries the skipped asset on a later sync.
 
+## Container package is missing or skipped
+
+Container packages are opt-in and currently limited to packages explicitly linked to repositories
+owned by `GITHUB_USERNAME`. Packages linked only to starred repositories are intentionally ignored.
+
+Check all of the following:
+
+1. `PACKAGES_ENABLED=true` and the container was recreated after changing `.env`.
+2. `GITHUB_PACKAGES_TOKEN` is a classic PAT with `read:packages`, has any required SSO approval, and
+   can download the package from `GITHUB_CONTAINER_REGISTRY`.
+3. The GitHub package page shows a repository connection to the owned source repository.
+4. The Gitea token has `write:package`, plus its existing repository and namespace permissions.
+5. The GitHarbor container can reach both registries and trusts their TLS certificates.
+6. Gitea package storage, its container size limit, and any reverse proxy allow the image.
+7. `PACKAGE_TRANSFER_TIMEOUT_SECONDS` is long enough for the complete multi-platform image.
+
+In `latest` mode, GitHarbor requires a literal `latest` tag. A warning about no literal tag means it
+deliberately refused to guess from timestamps; use `all` or publish `latest` upstream. Gitea does not
+advertise its container-package size limit through a standard API. `PACKAGE_MAX_BYTES` can skip an
+estimated oversized image early, but an actual Gitea or proxy rejection remains possible and is
+reported in **Last warning**. A failed new-latest transfer keeps the previously managed image.
+
 ## Large repository times out
 
 Increase `GIT_TIMEOUT_SECONDS`, then recreate the container. Temporary storage must fit one complete

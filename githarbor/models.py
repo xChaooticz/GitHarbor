@@ -76,6 +76,9 @@ class Repository(Base):
     )
 
     runs: Mapped[list[SyncRun]] = relationship(back_populates="repository")
+    container_images: Mapped[list[ContainerImage]] = relationship(
+        back_populates="repository", cascade="all, delete-orphan"
+    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -139,3 +142,31 @@ class SyncRun(Base):
             "succeeded": self.succeeded,
             "failed": self.failed,
         }
+
+
+class ContainerImage(Base):
+    __tablename__ = "container_images"
+    __table_args__ = (
+        UniqueConstraint(
+            "repository_id", "github_version_id", name="uq_container_repository_version"
+        ),
+        Index("ix_container_images_repository_package", "repository_id", "github_package_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    repository_id: Mapped[int] = mapped_column(
+        ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    github_package_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    github_version_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    package_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    destination_digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    managed_versions: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    repository: Mapped[Repository] = relationship(back_populates="container_images")

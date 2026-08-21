@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.4.0
+git checkout v0.5.0
 ```
 
 ## 3. Prepare Gitea
@@ -68,6 +68,7 @@ Create:
 
 - A read-only GitHub token for discovery, cloning, release assets, and LFS downloads
 - A Gitea token that can create repositories, push Git/LFS data, and write releases and attachments
+- Optionally, a separate classic GitHub PAT with `read:packages` for container images
 
 Do not select blanket access when granular permissions are available. The exact screens and minimal
 permissions are documented in
@@ -108,6 +109,12 @@ RELEASES_ENABLED=true
 RELEASE_ASSETS_ENABLED=true
 RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
+PACKAGES_ENABLED=false
+GITHUB_PACKAGES_TOKEN=replace-with-classic-github-packages-token
+GITHUB_CONTAINER_REGISTRY=ghcr.io
+CONTAINER_IMAGE_MODE=all
+PACKAGE_MAX_BYTES=0
+PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
 LOG_LEVEL=INFO
@@ -154,6 +161,8 @@ Then verify in Gitea:
    `git lfs fsck`.
 4. A populated GitHub wiki appears under the managed repository's Gitea **Wiki** tab.
 5. A GitHub release appears under Gitea **Releases**, with its transferable assets downloadable.
+6. If packages are enabled, a container linked to an owned repository appears under the configured
+   owned namespace and can be pulled from the Gitea registry.
 
 The dashboard's manual **Sync all repositories** action is useful after correcting a token or
 network issue. It is safe to retry; overlapping global runs are rejected.

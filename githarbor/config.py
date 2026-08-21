@@ -4,14 +4,20 @@ import re
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INTERVAL = re.compile(r"^(?P<value>[1-9]\d*)\s*(?P<unit>s|m|h|d)?$", re.IGNORECASE)
 
 
 class ReleaseAssetMode(StrEnum):
+    ALL = "all"
+    LATEST = "latest"
+
+
+class ContainerImageMode(StrEnum):
     ALL = "all"
     LATEST = "latest"
 
@@ -48,6 +54,12 @@ class Settings(BaseSettings):
     releases_enabled: bool = True
     release_assets_enabled: bool = True
     release_asset_mode: ReleaseAssetMode = ReleaseAssetMode.ALL
+    packages_enabled: bool = False
+    github_packages_token: SecretStr | None = None
+    github_container_registry: str = "ghcr.io"
+    container_image_mode: ContainerImageMode = ContainerImageMode.ALL
+    package_max_bytes: int = Field(default=0, ge=0)
+    package_transfer_timeout_seconds: int = Field(default=3600, ge=30)
     git_lfs_enabled: bool = True
     git_timeout_seconds: int = Field(default=3600, ge=30)
     api_timeout_seconds: int = Field(default=30, ge=5)
@@ -80,6 +92,34 @@ class Settings(BaseSettings):
     def validate_release_asset_mode(cls, value: str | ReleaseAssetMode) -> str:
         return str(value).strip().lower()
 
+    @field_validator("container_image_mode", mode="before")
+    @classmethod
+    def validate_container_image_mode(cls, value: str | ContainerImageMode) -> str:
+        return str(value).strip().lower()
+
+    @field_validator("github_container_registry")
+    @classmethod
+    def validate_container_registry(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9.-]+(?::[1-9]\d{0,4})?", value):
+            raise ValueError("must be a registry hostname with an optional port")
+        return value
+
+    @model_validator(mode="after")
+    def validate_package_settings(self) -> Settings:
+        if not self.packages_enabled:
+            return self
+        if self.github_packages_token is None:
+            raise ValueError("GITHUB_PACKAGES_TOKEN is required when PACKAGES_ENABLED=true")
+        parsed = urlsplit(str(self.gitea_url))
+        if parsed.path.rstrip("/") or parsed.query or parsed.fragment:
+            raise ValueError("GITEA_URL must be an instance root when package mirroring is enabled")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError(
+                "GITEA_URL cannot contain credentials when package mirroring is enabled"
+            )
+        return self
+
     @property
     def database_url(self) -> str:
         return f"sqlite:///{self.database_path.as_posix()}"
@@ -91,6 +131,17 @@ class Settings(BaseSettings):
     @property
     def gitea_api_base(self) -> str:
         return f"{str(self.gitea_url).rstrip('/')}/api/v1"
+
+    @property
+    def gitea_registry(self) -> str:
+        parsed = urlsplit(str(self.gitea_url))
+        if not parsed.netloc:
+            raise ValueError("GITEA_URL does not contain a registry hostname")
+        return parsed.netloc
+
+    @property
+    def gitea_registry_tls_verify(self) -> bool:
+        return urlsplit(str(self.gitea_url)).scheme.casefold() == "https"
 
 
 @lru_cache(maxsize=1)

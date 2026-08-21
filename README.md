@@ -15,7 +15,8 @@
 </p>
 
 GitHarbor continuously discovers repositories owned and starred by one GitHub account and mirrors
-their Git data, populated wikis, releases, and release assets into separate Gitea namespaces. Its
+their Git data, populated wikis, releases, release assets, and owned-repository container packages
+into separate Gitea namespaces. Its
 defining rule is preservation: a repository that vanishes, becomes inaccessible, is transferred,
 or is unstarred remains in Gitea. GitHarbor records the change in state and never automatically
 deletes a destination repository.
@@ -26,6 +27,8 @@ deletes a destination repository.
 - Authenticated Git LFS object preservation across all mirrored refs
 - Native Gitea wiki mirrors with complete GitHub wiki history and empty-wiki detection
 - Native Gitea release metadata and streamed release-asset mirroring with size-limit safeguards
+- Opt-in multi-platform container mirroring for packages linked to owned repositories, with
+  all-image or latest-image retention
 - Stable GitHub repository IDs for rename/transfer detection
 - Collision-proof starred naming and guarded Gitea ownership markers
 - Independent, paginated owned/starred discovery with transient API retries and rate-limit reporting
@@ -44,7 +47,8 @@ run history in SQLite. Each repository operation clones a bare mirror into an is
 directory, transfers referenced LFS objects, pushes the refs, and removes the directory. There are no
 persistent working trees. Populated GitHub wikis are mirrored separately through their Git
 repositories into Gitea's native wiki repositories. Releases and their assets are reconciled after
-the Git push through the GitHub and Gitea APIs.
+the Git push through the GitHub and Gitea APIs. Owned-repository container packages are discovered
+through the GitHub Packages API and copied registry-to-registry with Skopeo when enabled.
 
 See [Architecture decisions](docs/architecture.md) for identity, naming, safety, and failure rules.
 
@@ -81,6 +85,10 @@ authenticated account. GitHarbor never writes to GitHub.
 - Classic PAT: `repo` is needed to clone private repositories. Public-only operation can use the
   smaller public read access supported by GitHub. GitHarbor does not require the `read:user` scope.
 
+Container packages require a separate classic PAT in `GITHUB_PACKAGES_TOKEN` with
+`read:packages`. GitHub's container registry does not accept a fine-grained PAT for this registry
+login. Leave `PACKAGES_ENABLED=false` if package preservation is not needed.
+
 See [Tokens and permissions](docs/wiki/Tokens-and-Permissions.md) for click-by-click creation steps,
 least-privilege selections, enterprise notes, and rotation instructions.
 
@@ -92,8 +100,9 @@ authorization problem; GitHarbor therefore treats absence as state, never as per
 Create an API token for a dedicated Gitea account. It needs repository read/write access, permission
 to create repositories in both configured organizations (or in its own user namespace), and Git
 push access. With scoped-token Gitea versions and organization destinations, grant `read:user`,
-`write:organization`, and `write:repository`. A personal-user destination needs `write:user` instead
-of `read:user`. GitHarbor verifies `/api/v1/user` and accepts a destination namespace only when it is
+`write:organization`, and `write:repository`. Add `write:package` when container packages are
+enabled. A personal-user destination needs `write:user` instead of `read:user`. GitHarbor verifies
+`/api/v1/user` and accepts a destination namespace only when it is
 an organization accessible to the token or the authenticated user's own namespace. The
 [Gitea organizations guide](docs/wiki/Gitea-Organizations.md) covers the recommended two-organization
 layout.
@@ -123,6 +132,12 @@ child-process environment.
 | `RELEASE_ASSETS_ENABLED` | `true` | Mirror assets when release mirroring is enabled |
 | `RELEASE_ASSET_MODE` | `all` | Asset retention: `all` releases or only `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Per release-asset download or upload timeout |
+| `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned repositories |
+| `GITHUB_PACKAGES_TOKEN` | required when enabled | Classic GitHub PAT with `read:packages` |
+| `GITHUB_CONTAINER_REGISTRY` | `ghcr.io` | Source container registry host |
+| `CONTAINER_IMAGE_MODE` | `all` | Container retention: every digest or the literal `latest` digest |
+| `PACKAGE_MAX_BYTES` | `0` | Conservative per-image size ceiling; `0` disables it |
+| `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Per Skopeo registry operation timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Clone or push timeout per command |
 | `LOG_LEVEL` | `INFO` | JSON log threshold |
@@ -215,6 +230,30 @@ still match. Externally changed assets are retained with a warning, and releases
 current GitHub response are retained. Gitea authorship and creation timestamps, GitHub asset labels,
 and download counts cannot be recreated through the target API.
 
+## Container package mirroring
+
+Set `PACKAGES_ENABLED=true` to mirror GitHub Container Registry packages explicitly linked to an
+owned repository. Packages associated only with starred repositories are not copied. This boundary
+avoids silently archiving third-party images and may be expanded in a future release behind a
+separate opt-in policy.
+
+`CONTAINER_IMAGE_MODE=all` copies every discovered manifest and all of its tags. GitHarbor also adds
+a `githarbor-preserved-sha256-...` tag per digest so a mutable source tag moving later cannot make an
+older digest unreachable. `latest` means the literal case-insensitive `latest` tag—not the newest
+timestamp. It copies that digest plus every other source tag attached to the same digest, such as
+`1.4` and `1.4.0`. If no literal `latest` exists, GitHarbor warns and keeps the previous destination
+image rather than guessing.
+
+Multi-platform manifest lists and their referenced images are copied with preserved digests. A new
+latest image is fully copied and verified before GitHarbor removes older tags and digests recorded
+as its own. Unmanaged or externally changed Gitea tags are never deleted. Gitea does not advertise
+its container-package size limit through a standard settings API, so `PACKAGE_MAX_BYTES` provides a
+conservative preflight estimate. Gitea, storage, or reverse-proxy rejection is recorded in **Last
+warning**, marks the run partial, and leaves the previous latest image intact.
+
+See [Container packages](docs/wiki/Container-Packages.md) for setup, permissions, path mapping,
+retention details, and verification commands.
+
 ## API
 
 - `GET /api/health`
@@ -272,12 +311,17 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
   and its LFS storage has enough free space. Git refs are intentionally withheld on LFS failure.
 - **Release asset is skipped:** inspect **Last warning** on the repository page. Compare the asset
   size with Gitea's attachment limit and any reverse-proxy body-size limit, then retry the sync.
+- **Container image is skipped:** inspect **Last warning**, verify both package token scopes and
+  registry reachability, then compare Gitea's package and reverse-proxy limits with
+  `PACKAGE_MAX_BYTES`.
 
 ## Current limitations
 
 - One GitHub identity and one application replica per SQLite database
 - No built-in login/RBAC; use an authenticated reverse proxy
 - No issue, pull request, Actions, discussion, LFS-lock, or orphaned-LFS-object migration
+- Container packages are limited to packages linked to owned repositories; starred-repository
+  package mirroring may be added as a separate opt-in mode in a future release
 - Release authorship/timestamps, asset labels/download counts, and deleted source releases are not
   reproduced; GitHarbor preserves the last managed release instead
 - In-process locks do not coordinate multiple GitHarbor containers; run one replica

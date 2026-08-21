@@ -14,11 +14,14 @@ from sqlalchemy import func, select, text
 from githarbor import __version__
 from githarbor.clients.gitea import GiteaClient
 from githarbor.clients.github import GitHubClient
+from githarbor.clients.github_packages import GitHubPackagesClient
 from githarbor.config import Settings, get_settings
 from githarbor.database import Database, run_migrations
 from githarbor.logging import configure_logging
 from githarbor.models import Repository, SyncRun
+from githarbor.services.containers import ContainerMirrorService
 from githarbor.services.git import GitMirror
+from githarbor.services.registry import RegistryCredentials, SkopeoClient
 from githarbor.services.scheduler import Scheduler
 from githarbor.services.sync import SyncService
 
@@ -46,12 +49,39 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             settings.api_timeout_seconds,
             settings.release_asset_timeout_seconds,
         )
+        github_packages: GitHubPackagesClient | None = None
+        container_mirror: ContainerMirrorService | None = None
+        if settings.packages_enabled:
+            assert settings.github_packages_token is not None
+            github_packages = GitHubPackagesClient(
+                settings.github_api_base,
+                settings.github_packages_token.get_secret_value(),
+                settings.github_username,
+                settings.api_timeout_seconds,
+            )
+            container_mirror = ContainerMirrorService(
+                database,
+                github_packages,
+                gitea,
+                SkopeoClient(settings.package_transfer_timeout_seconds),
+                RegistryCredentials(
+                    settings.github_container_registry,
+                    settings.github_username,
+                    settings.github_packages_token.get_secret_value(),
+                ),
+                settings.gitea_registry,
+                settings.gitea_token.get_secret_value(),
+                destination_tls_verify=settings.gitea_registry_tls_verify,
+                image_mode=settings.container_image_mode,
+                max_bytes=settings.package_max_bytes,
+            )
         service = SyncService(
             settings,
             database,
             github,
             gitea,
             GitMirror(settings.git_timeout_seconds, settings.git_lfs_enabled),
+            container_mirror,
         )
         scheduler = Scheduler(service, settings.sync_interval, settings.sync_on_startup)
         app.state.settings = settings
@@ -62,6 +92,8 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         yield
         await scheduler.stop()
         await service.shutdown()
+        if github_packages is not None:
+            await github_packages.close()
         await github.close()
         await gitea.close()
         database.engine.dispose()

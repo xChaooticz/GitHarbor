@@ -11,7 +11,7 @@ RUN pip wheel --wheel-dir /wheels .
 
 FROM builder AS dev
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y git git-lfs \
+    && apt-get install --no-install-recommends -y git git-lfs skopeo \
     && rm -rf /var/lib/apt/lists/*
 COPY tests ./tests
 RUN pip install --no-cache-dir /wheels/* \
@@ -30,7 +30,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/home/githarbor/.local/bin:$PATH"
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y git git-lfs ca-certificates \
+    && apt-get install --no-install-recommends -y git git-lfs skopeo ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin githarbor \
     && mkdir -p /app /data \

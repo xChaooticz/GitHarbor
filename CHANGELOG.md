@@ -7,6 +7,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-21
+
+### Added
+
+- Opt-in GitHub Container Registry package mirroring for packages linked to owned repositories.
+- `CONTAINER_IMAGE_MODE=all|latest` retention: `all` preserves every discovered digest and tag,
+  while `latest` retains the literal `latest` digest and every version tag attached to it.
+- Multi-platform OCI copying with digest verification, a durable ownership journal, guarded Gitea
+  package linking, and safe managed-tag cleanup.
+- Configurable package transfer timeout and conservative per-image size ceiling, with persistent
+  warnings for oversized or rejected transfers.
+
+### Changed
+
+- The Docker image now includes Skopeo for authenticated registry-to-registry image transfer.
+- Gitea package or reverse-proxy size rejections leave the repository active, mark the run partial,
+  retain the previous latest image, and retry during a later sync.
+
+### Security
+
+- Registry credentials are passed through short-lived permission-restricted auth files rather than
+  process arguments, and GitHub package reads use a separate classic `read:packages` token.
+
 ## [0.4.0] - 2026-08-21
 
 ### Added
@@ -94,7 +117,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.1.1...v0.2.0

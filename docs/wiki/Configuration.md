@@ -36,6 +36,12 @@ before filling in token values.
 | `RELEASE_ASSETS_ENABLED` | `true` | Reconcile attachments for mirrored releases |
 | `RELEASE_ASSET_MODE` | `all` | Keep assets for `all` releases or only the `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Timeout for each asset download or upload; minimum 30 |
+| `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned repositories |
+| `GITHUB_PACKAGES_TOKEN` | none | Classic GitHub PAT with `read:packages`; required when enabled |
+| `GITHUB_CONTAINER_REGISTRY` | `ghcr.io` | Source registry hostname, optionally with a port |
+| `CONTAINER_IMAGE_MODE` | `all` | Keep every image digest or only the literal `latest` digest |
+| `PACKAGE_MAX_BYTES` | `0` | Conservative estimated per-image byte limit; `0` disables it |
+| `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Timeout for each registry operation; minimum 30 |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload reachable LFS objects before pushing refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Timeout for each Git or Git LFS command; minimum 30 |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
@@ -62,6 +68,12 @@ RELEASES_ENABLED=true
 RELEASE_ASSETS_ENABLED=true
 RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
+PACKAGES_ENABLED=false
+GITHUB_PACKAGES_TOKEN=replace-with-classic-github-packages-token
+GITHUB_CONTAINER_REGISTRY=ghcr.io
+CONTAINER_IMAGE_MODE=all
+PACKAGE_MAX_BYTES=0
+PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
 LOG_LEVEL=INFO
@@ -93,12 +105,15 @@ see [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Org
 
 ## Optional mirror layers
 
-The primary Git mirror is always enabled. `WIKI_ENABLED`, `RELEASES_ENABLED`, and
-`RELEASE_ASSETS_ENABLED` control the optional layers independently. All default to `true`.
+The primary Git mirror is always enabled. `WIKI_ENABLED`, `RELEASES_ENABLED`,
+`RELEASE_ASSETS_ENABLED`, and `PACKAGES_ENABLED` control optional layers independently. The first
+three default to `true`; package mirroring defaults to `false` because it needs another GitHub token
+and can consume substantial registry storage.
 
 - `WIKI_ENABLED=false` skips wiki detection and mirroring.
 - `RELEASES_ENABLED=false` skips release metadata and release assets.
 - `RELEASE_ASSETS_ENABLED=false` keeps release metadata current but skips attachment reconciliation.
+- `PACKAGES_ENABLED=false` skips container discovery and transfer.
 
 Disabling a layer does not remove data already preserved in Gitea. If releases are disabled, the
 release-assets setting and asset mode have no effect.
@@ -110,6 +125,23 @@ latest release, GitHarbor uploads its assets and safely deletes assets it previo
 older releases. If the new latest asset set has any failure, older assets remain until a later retry
 succeeds. Unmanaged or externally changed Gitea attachments are retained with a warning.
 
+Package mirroring currently applies only to GitHub container packages explicitly linked to an
+owned repository. Starred-repository packages are intentionally excluded and may be supported by a
+separate opt-in mode in a future release.
+
+`CONTAINER_IMAGE_MODE=all` mirrors every image digest and all source tags, adding a stable
+`githarbor-preserved-sha256-...` tag for each digest. `latest` selects the digest carrying the
+literal `latest` tag and mirrors all tags attached to that same digest. It does not infer latest from
+timestamps. After a new latest digest is copied and verified, only old tags and digests recorded as
+GitHarbor-managed are removed. A missing `latest`, failed copy, changed tag, or unmanaged reference
+preserves the previous data and produces a warning.
+
+`PACKAGE_MAX_BYTES` is a client-side estimate based on manifest descriptor sizes. Gitea does not
+provide its container-package limit through a standard settings endpoint, and a reverse proxy may
+have its own limit, so the destination can still reject an image. Such a failure is reported as a
+partial repository run and retried later. See
+[Container packages](https://github.com/xChaooticz/GitHarbor/wiki/Container-Packages).
+
 ## Timeouts
 
 `API_TIMEOUT_SECONDS` covers individual HTTP API calls. GitHarbor retries transient API and rate
@@ -119,6 +151,11 @@ limit failures independently.
 upload. Assets are processed one at a time, so temporary space needs to fit only the current asset.
 Increasing this timeout does not change Gitea's attachment limit or a reverse proxy's request-body
 limit.
+
+`PACKAGE_TRANSFER_TIMEOUT_SECONDS` applies to each Skopeo inspect, copy, tag-list, or delete
+operation. Large multi-platform images may need more time. Registry layers stream directly between
+the source and destination through the GitHarbor container; ensure its network path can sustain the
+transfer.
 
 `GIT_TIMEOUT_SECONDS` applies to each clone, LFS transfer, and push command. Increase it when large
 repositories fail at a repeatable duration. Also confirm that the container host has enough temporary

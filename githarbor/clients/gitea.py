@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -62,6 +62,32 @@ class GiteaRelease:
             gitea_id=int(data["id"]),
             tag_name=str(data["tag_name"]),
             body=str(data.get("body") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class GiteaPackage:
+    gitea_id: int
+    name: str
+    version: str
+    package_type: str
+    size: int
+    repository_name: str | None
+
+    @classmethod
+    def from_gitea(cls, data: dict[str, Any]) -> GiteaPackage:
+        repository = data.get("repository")
+        return cls(
+            gitea_id=int(data["id"]),
+            name=str(data["name"]),
+            version=str(data["version"]),
+            package_type=str(data["type"]),
+            size=int(data.get("size") or 0),
+            repository_name=(
+                str(repository["name"])
+                if isinstance(repository, dict) and repository.get("name")
+                else None
+            ),
         )
 
 
@@ -241,6 +267,46 @@ class GiteaClient:
         await self._empty_request(
             "DELETE",
             f"repos/{namespace}/{name}/releases/{release_id}/assets/{attachment_id}",
+        )
+
+    async def list_container_versions(self, namespace: str, package: str) -> list[GiteaPackage]:
+        versions: list[GiteaPackage] = []
+        page = 1
+        package_path = quote(package, safe="")
+        while True:
+            response = await self._raw_request(
+                "GET",
+                f"packages/{quote(namespace, safe='')}/container/{package_path}",
+                params={"page": str(page), "limit": "50"},
+                allow_not_found=True,
+            )
+            if response is None:
+                return []
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise GiteaError("Gitea returned an invalid container package version list")
+            page_versions = [
+                GiteaPackage.from_gitea(item) for item in payload if isinstance(item, dict)
+            ]
+            versions.extend(page_versions)
+            if len(payload) < 50:
+                return versions
+            page += 1
+
+    async def link_container_package(
+        self, namespace: str, package: str, repository_name: str
+    ) -> None:
+        await self._empty_request(
+            "POST",
+            f"packages/{quote(namespace, safe='')}/container/{quote(package, safe='')}"
+            f"/-/link/{quote(repository_name, safe='')}",
+        )
+
+    async def delete_container_version(self, namespace: str, package: str, version: str) -> None:
+        await self._empty_request(
+            "DELETE",
+            f"packages/{quote(namespace, safe='')}/container/{quote(package, safe='')}"
+            f"/{quote(version, safe='')}",
         )
 
     async def ensure_repository(
