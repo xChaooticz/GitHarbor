@@ -7,6 +7,10 @@ After changing a value, recreate the container rather than using a simple restar
 docker compose up -d --force-recreate githarbor
 ```
 
+`GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
+it to a release such as `v0.5.0` when you want a reproducible deployment. The Compose file keeps a
+local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
+
 ## Required settings
 
 | Variable | Meaning | Example |
@@ -173,6 +177,6 @@ replicas against the same SQLite file.
 
 ## Network exposure
 
-The supplied port mapping is `127.0.0.1:8000:8000`, so only the Docker host can reach the dashboard.
+The supplied port mapping is `127.0.0.1:9005:8000`, so only the Docker host can reach the dashboard.
 Do not change it to a public bind unless an authenticated reverse proxy or equivalent access control
 protects the service. GitHarbor has no built-in login.

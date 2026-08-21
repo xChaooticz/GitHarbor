@@ -8,7 +8,7 @@ backups, upgrades, token rotation, and recovery checks.
 ```sh
 docker compose ps
 docker compose logs --tail 100 githarbor
-curl --fail http://127.0.0.1:8000/api/health
+curl --fail http://127.0.0.1:9005/api/health
 ```
 
 The dashboard shows the last global run, connection state, repository status counts, and individual
@@ -24,7 +24,7 @@ repository names and failure details may be sensitive.
 Use **Sync all repositories** in the dashboard, or call:
 
 ```sh
-curl --fail -X POST http://127.0.0.1:8000/api/sync
+curl --fail -X POST http://127.0.0.1:9005/api/sync
 ```
 
 An accepted request returns HTTP `202`. A concurrent global or per-repository run returns `409`
@@ -76,14 +76,21 @@ rather than relying on reconstruction.
 ## Upgrade GitHarbor
 
 Read the [changelog](https://github.com/xChaooticz/GitHarbor/blob/main/CHANGELOG.md) before upgrading,
-then back up the volume and deploy a specific release tag:
+then back up the volume. For the published image, set `GITHARBOR_IMAGE_TAG` in `.env` to a specific
+release and pull it:
+
+```sh
+docker compose pull githarbor
+docker compose up -d --no-deps githarbor
+docker compose logs --tail 100 githarbor
+```
+
+To build a release from source instead:
 
 ```sh
 git fetch --tags
-git checkout v0.4.0
-docker compose build --pull githarbor
-docker compose up -d --no-deps githarbor
-docker compose logs --tail 100 githarbor
+git checkout v0.5.0
+docker compose up -d --build --no-deps githarbor
 ```
 
 GitHarbor applies Alembic database migrations automatically at startup. Do not downgrade across a

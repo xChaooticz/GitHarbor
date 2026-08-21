@@ -60,12 +60,22 @@ networking, both provider tokens, Gitea organizations, Git LFS, first-run verifi
 ```sh
 cp .env.example .env
 # Edit .env with tokens, usernames, namespaces, and the Gitea URL.
-docker compose build
 docker compose up -d
 docker compose logs -f githarbor
 ```
 
-Open <http://127.0.0.1:8000>. Compose binds only to loopback by default. Put GitHarbor behind an
+This pulls `ghcr.io/xchaooticz/githarbor:latest`. To build the image locally from the checked-out
+source instead, use:
+
+```sh
+docker compose up -d --build
+```
+
+Set `GITHARBOR_IMAGE_TAG=v0.5.0` in `.env` to pin a specific published release. Private GHCR
+packages require `docker login ghcr.io` before Compose can pull them.
+
+Open <http://127.0.0.1:9005>. Compose maps host port `9005` to the container's internal port `8000`
+and binds only to loopback by default. Put GitHarbor behind an
 authenticated HTTPS reverse proxy before exposing it to a LAN or the internet; GitHarbor has no
 built-in user authentication.
 

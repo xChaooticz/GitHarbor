@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Automated multi-platform GHCR publishing for releases, plus a manual workflow for rebuilding a
+  specific release tag.
+
+### Changed
+
+- Docker Compose now pulls `ghcr.io/xchaooticz/githarbor:latest` by default while retaining a local
+  `--build` path and an optional `GITHARBOR_IMAGE_TAG` release pin.
+- The default loopback dashboard port changed from `8000` to `9005`; the container continues to
+  listen on internal port `8000`.
+
 ## [0.5.0] - 2026-08-21
 
 ### Added

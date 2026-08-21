@@ -1,7 +1,10 @@
 services:
   githarbor:
-    build: .
-    image: githarbor:local
+    image: ghcr.io/xchaooticz/githarbor:${GITHARBOR_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: always
     container_name: githarbor
     restart: unless-stopped
     env_file:
@@ -9,7 +12,7 @@ services:
     environment:
       DATABASE_PATH: /data/githarbor.db
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:9005:8000"
     volumes:
       - githarbor-data:/data
     security_opt:
