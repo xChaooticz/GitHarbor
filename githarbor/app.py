@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,6 +29,7 @@ from githarbor.services.sync import SyncService
 
 PACKAGE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
+logger = logging.getLogger(__name__)
 
 
 def create_app(provided_settings: Settings | None = None) -> FastAPI:
@@ -90,6 +92,12 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         app.state.sync_service = service
         app.state.scheduler = scheduler
         scheduler.start()
+        logger.info(
+            "GitHarbor started: version=%s sync_on_startup=%s sync_interval_seconds=%d",
+            __version__,
+            settings.sync_on_startup,
+            settings.sync_interval,
+        )
         yield
         await scheduler.stop()
         await service.shutdown()
@@ -186,7 +194,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         return {**repository.as_dict(), "sync_history": [run.as_dict() for run in runs]}
 
     @application.post("/api/sync", status_code=status.HTTP_202_ACCEPTED)
-    def api_sync(request: Request) -> dict[str, str]:
+    async def api_sync(request: Request) -> dict[str, str]:
         _, service, _ = dependencies(request)
         if not service.start_global_sync("api"):
             raise HTTPException(
@@ -197,7 +205,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
     @application.post(
         "/api/repositories/{repository_id}/sync", status_code=status.HTTP_202_ACCEPTED
     )
-    def api_repository_sync(repository_id: int, request: Request) -> dict[str, str]:
+    async def api_repository_sync(repository_id: int, request: Request) -> dict[str, str]:
         database, service, _ = dependencies(request)
         with database.session_factory() as session:
             if session.get(Repository, repository_id) is None:
@@ -209,13 +217,16 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
     @application.get("/", response_class=HTMLResponse)
     def dashboard(request: Request) -> HTMLResponse:
         _, service, scheduler = dependencies(request)
+        dashboard_status = service.status(scheduler.next_sync)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
             {
-                "status": service.status(scheduler.next_sync),
+                "status": dashboard_status,
                 "version": __version__,
                 "admin_actions_available": request.app.state.settings.admin_actions_available,
+                "auto_refresh": True,
+                "sync_running": dashboard_status["sync_running"],
             },
         )
 
@@ -226,7 +237,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         repository_status: Annotated[str, Query(alias="status")] = "",
         search: str = "",
     ) -> HTMLResponse:
-        database, _, _ = dependencies(request)
+        database, service, _ = dependencies(request)
         statement = select(Repository)
         if kind:
             statement = statement.where(Repository.kind == kind)
@@ -243,12 +254,14 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
                 "repositories": repositories,
                 "filters": {"kind": kind, "status": repository_status, "search": search},
                 "admin_actions_available": request.app.state.settings.admin_actions_available,
+                "auto_refresh": True,
+                "sync_running": service.is_running,
             },
         )
 
     @application.get("/repositories/{repository_id}", response_class=HTMLResponse)
     def repository_page(repository_id: int, request: Request) -> HTMLResponse:
-        database, _, _ = dependencies(request)
+        database, service, _ = dependencies(request)
         with database.session_factory() as session:
             repository = session.get(Repository, repository_id)
             if repository is None:
@@ -266,6 +279,8 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
                 "repository": repository,
                 "runs": runs,
                 "admin_actions_available": request.app.state.settings.admin_actions_available,
+                "auto_refresh": True,
+                "sync_running": service.is_running,
             },
         )
 
@@ -290,13 +305,13 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         )
 
     @application.post("/actions/sync")
-    def web_sync(request: Request) -> RedirectResponse:
+    async def web_sync(request: Request) -> RedirectResponse:
         _, service, _ = dependencies(request)
         service.start_global_sync("web")
         return RedirectResponse("/", status_code=303)
 
     @application.post("/actions/repositories/{repository_id}/sync")
-    def web_repository_sync(
+    async def web_repository_sync(
         repository_id: int, request: Request, submit: Annotated[str, Form()] = "sync"
     ) -> RedirectResponse:
         del submit

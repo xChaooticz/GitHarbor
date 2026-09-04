@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -55,6 +56,58 @@ async def test_enable_wiki_updates_repository_unit() -> None:
         base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
     )
     await client.enable_wiki("archive", "project")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_initialize_wiki_creates_backing_repository_only_when_empty() -> None:
+    requests: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content) if request.content else None
+        requests.append((request.method, request.url.path, payload))
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(201, json={"title": "GitHarbor-initialization"})
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+
+    assert await client.initialize_wiki_if_empty("archive", "project") is True
+    await client.close()
+
+    assert requests == [
+        ("GET", "/repos/archive/project/wiki/pages", None),
+        (
+            "POST",
+            "/repos/archive/project/wiki/new",
+            {
+                "title": "GitHarbor-initialization",
+                "content_base64": (
+                    "VGhpcyB0ZW1wb3JhcnkgcGFnZSBpcyByZXBsYWNlZCBieSBHaXRIYXJib3IncyBzb3VyY2Ugd2lraSBt"
+                    "aXJyb3IuCg=="
+                ),
+                "message": "Initialize wiki for GitHarbor mirror",
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_initialize_wiki_preserves_existing_pages() -> None:
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=[{"title": "Home"}])
+        ),
+    )
+
+    assert await client.initialize_wiki_if_empty("archive", "project") is False
     await client.close()
 
 

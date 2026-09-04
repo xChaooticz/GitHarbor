@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -163,6 +164,40 @@ class GiteaClient:
                 f"Gitea did not enable the wiki for {namespace}/{name}; "
                 "check whether the wiki repository unit is globally available"
             )
+
+    async def initialize_wiki_if_empty(self, namespace: str, name: str) -> bool:
+        """Create Gitea's backing wiki repository when it does not exist yet.
+
+        Enabling the wiki unit alone does not create ``<repository>.wiki.git`` on all Gitea
+        deployments. Creating a temporary page initializes it; the subsequent Git mirror replaces
+        that temporary commit with the source wiki's complete history.
+        """
+        endpoint = f"repos/{namespace}/{name}/wiki/pages"
+        response = await self._raw_request(
+            "GET", endpoint, params={"limit": "1"}, allow_not_found=True
+        )
+        if response is not None:
+            pages = response.json()
+            if not isinstance(pages, list):
+                raise GiteaError("Gitea returned an invalid wiki page list")
+            if pages:
+                return False
+
+        content = base64.b64encode(
+            b"This temporary page is replaced by GitHarbor's source wiki mirror.\n"
+        ).decode("ascii")
+        payload = await self._request(
+            "POST",
+            f"repos/{namespace}/{name}/wiki/new",
+            json={
+                "title": "GitHarbor-initialization",
+                "content_base64": content,
+                "message": "Initialize wiki for GitHarbor mirror",
+            },
+        )
+        if not isinstance(payload, dict):
+            raise GiteaError("Gitea returned an invalid wiki initialization response")
+        return True
 
     async def set_default_branch(self, namespace: str, name: str, branch: str) -> None:
         payload = await self._request(

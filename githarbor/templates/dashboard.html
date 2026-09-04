@@ -15,9 +15,10 @@
 <section class="cards">
   {% for label, value, tone in [
     ('Owned', status.counts.owned, 'blue'), ('Starred', status.counts.starred, 'gold'),
-    ('Active', status.counts.active, 'green'), ('Unavailable', status.counts.unavailable, 'gray'),
+    ('Mirrored', status.counts.active, 'green'), ('Syncing', status.counts.syncing, 'blue'),
+    ('Unavailable', status.counts.unavailable, 'gray'),
     ('Unstarred', status.counts.unstarred, 'gray'), ('Errors', status.counts.error, 'red')] %}
-  <a class="card {{ tone }}" href="/repositories{% if label|lower in ['owned','starred'] %}?kind={{ label|lower }}{% elif label == 'Errors' %}?status=error{% elif label != 'Active' %}?status={{ label|lower }}{% endif %}">
+  <a class="card {{ tone }}" href="/repositories{% if label|lower in ['owned','starred'] %}?kind={{ label|lower }}{% elif label == 'Errors' %}?status=error{% elif label == 'Mirrored' %}?status=active{% else %}?status={{ label|lower }}{% endif %}">
     <span>{{ label }}</span><strong>{{ value }}</strong>
   </a>{% endfor %}
 </section>

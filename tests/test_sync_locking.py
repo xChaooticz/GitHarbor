@@ -112,10 +112,21 @@ async def test_per_repository_sync_is_locked(tmp_path: Path, upstream: UpstreamR
     assert service.start_repository_sync(repository_id, "test") is True
     assert service.start_repository_sync(repository_id, "test") is False
     await asyncio.wait_for(git.started.wait(), timeout=2)
+    assert service.status()["counts"] == {
+        "owned": 0,
+        "starred": 1,
+        "active": 0,
+        "syncing": 1,
+        "unavailable": 0,
+        "unstarred": 0,
+        "error": 0,
+    }
     assert await service.sync_repository(repository_id, "test") is False
     git.release.set()
     await service._repository_tasks[repository_id]
     assert git.calls == 1
+    assert service.status()["counts"]["syncing"] == 0
+    assert service.status()["counts"]["active"] == 1
     with database.session_factory() as session:
         assert session.get(Repository, repository_id).status == RepositoryStatus.ACTIVE.value  # type: ignore[union-attr]
 

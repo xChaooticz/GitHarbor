@@ -29,6 +29,7 @@ class FakeGitHub:
 class RecordingGitea:
     def __init__(self) -> None:
         self.enabled_wikis: list[tuple[str, str]] = []
+        self.initialized_wikis: list[tuple[str, str]] = []
         self.default_branches: list[tuple[str, str, str]] = []
         self.ensure_calls: list[dict[str, Any]] = []
 
@@ -48,6 +49,10 @@ class RecordingGitea:
 
     async def enable_wiki(self, namespace: str, name: str) -> None:
         self.enabled_wikis.append((namespace, name))
+
+    async def initialize_wiki_if_empty(self, namespace: str, name: str) -> bool:
+        self.initialized_wikis.append((namespace, name))
+        return True
 
     async def set_default_branch(self, namespace: str, name: str, branch: str) -> None:
         self.default_branches.append((namespace, name, branch))
@@ -193,10 +198,12 @@ async def test_sync_mirrors_only_populated_wikis(
     assert gitea.default_branches == [("archive", "project", "main")]
     if wiki_has_refs:
         assert gitea.enabled_wikis == [("archive", "project")]
+        assert gitea.initialized_wikis == [("archive", "project")]
         assert git.wiki_mirrors[0]["source_url"].endswith("/project.wiki.git")
         assert git.wiki_mirrors[0]["destination_url"].endswith("/project.wiki.git")
     else:
         assert gitea.enabled_wikis == []
+        assert gitea.initialized_wikis == []
         assert git.wiki_mirrors == []
 
 
@@ -292,7 +299,7 @@ async def test_release_asset_warning_is_persisted_as_partial_run(
 
 
 @pytest.mark.asyncio
-async def test_wiki_or_release_failure_does_not_hide_primary_repository_mirror(
+async def test_wiki_failure_marks_repository_and_run_as_error(
     tmp_path: Path, upstream: UpstreamRepository
 ) -> None:
     upstream = replace(upstream, has_wiki=True)
@@ -326,17 +333,16 @@ async def test_wiki_or_release_failure_does_not_hide_primary_repository_mirror(
         RecordingGitea(),  # type: ignore[arg-type]
         git,  # type: ignore[arg-type]
     )
-    service.release_mirror = FailingReleaseMirror()  # type: ignore[assignment]
+    service.release_mirror = ForbiddenReleaseMirror()  # type: ignore[assignment]
 
-    assert await service.sync_repository(repository_id, "test") is True
+    assert await service.sync_repository(repository_id, "test") is False
     assert git.primary_mirrors == 1
     with database.session_factory() as session:
         repository = session.get(Repository, repository_id)
         assert repository is not None
-        assert repository.status == RepositoryStatus.ACTIVE.value
-        assert "wiki mirror failed" in (repository.last_warning or "")
-        assert "release mirror failed" in (repository.last_warning or "")
-        assert repository.runs[0].status == RunStatus.PARTIAL.value
+        assert repository.status == RepositoryStatus.ERROR.value
+        assert "destination wiki endpoint returned HTTP 500" in (repository.last_error or "")
+        assert repository.runs[0].status == RunStatus.FAILED.value
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-09-04
+
+### Changed
+
+- The dashboard, repository list, and repository detail pages automatically refresh while a
+  synchronization is active, including one final refresh when it completes.
+- `INFO` logs now show application startup plus detailed global and per-repository synchronization
+  progress through discovery, destination setup, Git, wiki, release, and package stages.
+- The dashboard labels completed copies as **Mirrored** and shows a separate **Syncing** count that
+  falls as repository transfers complete.
+- Wiki mirroring now initializes Gitea's missing `.wiki.git` backing repository before pushing the
+  source wiki history.
+- Wiki clone, initialization, and push failures now mark the repository synchronization as an
+  error instead of a partial success.
+
+### Fixed
+
+- Dashboard, repository-page, and API sync triggers now start their background work on the
+  application event loop instead of failing with an internal server error.
+
 ## [0.6.4] - 2026-09-04
 
 ### Fixed
@@ -203,7 +223,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.1...v0.6.2

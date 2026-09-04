@@ -149,6 +149,7 @@ class SyncService:
         if self.global_lock.locked():
             return
         async with self.global_lock:
+            logger.info("Global synchronization started: trigger=%s", trigger)
             run_id = self._start_run(None, "global", trigger)
             discovered_by_id: dict[tuple[int, str], UpstreamRepository] = {}
             discovery_errors: list[str] = []
@@ -162,9 +163,13 @@ class SyncService:
                 ),
             ):
                 try:
+                    logger.info("Discovering %s GitHub repositories", kind.value)
                     repositories = await discover()
                     self.github_status = "connected"
                     counts[kind] = len(repositories)
+                    logger.info(
+                        "Discovered %d %s GitHub repositories", len(repositories), kind.value
+                    )
                     seen_at = datetime.now(UTC)
                     with self.database.session_factory() as session:
                         ids = self.reconciler.reconcile(
@@ -187,6 +192,7 @@ class SyncService:
             succeeded = 0
             failed = 0
             warnings = 0
+            logger.info("Global synchronization will mirror %d repositories", len(discovered_by_id))
             for (repository_id, _kind), upstream in discovered_by_id.items():
                 if await self.sync_repository(repository_id, trigger="global", upstream=upstream):
                     succeeded += 1
@@ -251,6 +257,12 @@ class SyncService:
                 namespace = repository.destination_namespace
                 destination = repository.destination_name
             run_id = self._start_run(repository_id, "repository", trigger)
+            logger.info(
+                "Repository synchronization started: repository_id=%d upstream=%s trigger=%s",
+                repository_id,
+                full_name,
+                trigger,
+            )
             try:
                 if upstream is None:
                     upstream = await self.github.get_repository(full_name)
@@ -274,6 +286,12 @@ class SyncService:
                         requested_destination = preferred
                         fallback_destination = collision_safe
 
+                logger.info(
+                    "Preparing destination: repository_id=%d namespace=%s name=%s",
+                    repository_id,
+                    namespace,
+                    requested_destination,
+                )
                 destination_repo = await self.gitea.ensure_repository(
                     namespace=namespace,
                     name=requested_destination,
@@ -285,6 +303,12 @@ class SyncService:
                     fallback_name=fallback_destination,
                 )
                 destination = destination_repo.name
+                logger.info(
+                    "Destination ready: repository_id=%d namespace=%s name=%s",
+                    repository_id,
+                    namespace,
+                    destination,
+                )
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)
                     assert repository is not None
@@ -296,6 +320,9 @@ class SyncService:
                     self.settings.github_token.get_secret_value(),
                     self.settings.gitea_token.get_secret_value(),
                 ]
+                logger.info(
+                    "Mirroring Git refs: repository_id=%d upstream=%s", repository_id, full_name
+                )
                 await self.git.mirror(
                     source_url=upstream.clone_url,
                     source_token=self.settings.github_token.get_secret_value(),
@@ -303,46 +330,58 @@ class SyncService:
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
                 )
+                logger.info(
+                    "Git refs mirrored: repository_id=%d upstream=%s", repository_id, full_name
+                )
                 if upstream.default_branch:
                     await self.gitea.set_default_branch(
                         namespace, destination, upstream.default_branch
                     )
-                optional_warnings: list[str] = []
+                    logger.info(
+                        "Default branch applied: repository_id=%d branch=%s",
+                        repository_id,
+                        upstream.default_branch,
+                    )
                 if self.settings.wiki_enabled and upstream.has_wiki:
-                    try:
-                        has_wiki_content = await self.git.remote_has_refs(
-                            upstream.wiki_clone_url,
-                            self.settings.github_token.get_secret_value(),
+                    logger.info(
+                        "Checking wiki: repository_id=%d upstream=%s", repository_id, full_name
+                    )
+                    has_wiki_content = await self.git.remote_has_refs(
+                        upstream.wiki_clone_url,
+                        self.settings.github_token.get_secret_value(),
+                    )
+                    if has_wiki_content:
+                        logger.info(
+                            "Mirroring wiki: repository_id=%d upstream=%s",
+                            repository_id,
+                            full_name,
                         )
-                        if has_wiki_content:
-                            await self.gitea.enable_wiki(namespace, destination)
-                            await self.git.mirror_wiki(
-                                source_url=upstream.wiki_clone_url,
-                                source_token=self.settings.github_token.get_secret_value(),
-                                destination_url=destination_repo.wiki_clone_url,
-                                destination_token=self.settings.gitea_token.get_secret_value(),
-                                destination_username=str(user["login"]),
-                            )
+                        await self.gitea.enable_wiki(namespace, destination)
+                        if await self.gitea.initialize_wiki_if_empty(namespace, destination):
                             logger.info(
-                                "Mirrored wiki for GitHub repository %s", upstream.full_name
+                                "Initialized destination wiki: repository_id=%d", repository_id
                             )
-                        else:
-                            logger.info(
-                                "Skipped enabled but empty wiki for GitHub repository %s",
-                                upstream.full_name,
-                            )
-                    except Exception as exc:
-                        message = redact(str(exc), secrets)[:1000]
-                        optional_warnings.append(f"wiki mirror failed: {message}")
-                        logger.warning(
-                            "Wiki mirror for GitHub repository %s failed after the primary "
-                            "repository was preserved: %s",
+                        await self.git.mirror_wiki(
+                            source_url=upstream.wiki_clone_url,
+                            source_token=self.settings.github_token.get_secret_value(),
+                            destination_url=destination_repo.wiki_clone_url,
+                            destination_token=self.settings.gitea_token.get_secret_value(),
+                            destination_username=str(user["login"]),
+                        )
+                        logger.info("Mirrored wiki for GitHub repository %s", upstream.full_name)
+                    else:
+                        logger.info(
+                            "Skipped enabled but empty wiki for GitHub repository %s",
                             upstream.full_name,
-                            message,
                         )
                 release_warnings: list[str] = []
                 if self.settings.releases_enabled:
                     try:
+                        logger.info(
+                            "Mirroring releases: repository_id=%d upstream=%s",
+                            repository_id,
+                            full_name,
+                        )
                         release_warnings = await self.release_mirror.mirror(
                             upstream.full_name,
                             namespace,
@@ -350,9 +389,14 @@ class SyncService:
                             mirror_assets=self.settings.release_assets_enabled,
                             asset_mode=self.settings.release_asset_mode,
                         )
+                        logger.info(
+                            "Release mirror complete: repository_id=%d warnings=%d",
+                            repository_id,
+                            len(release_warnings),
+                        )
                     except Exception as exc:
                         message = redact(str(exc), secrets)[:1000]
-                        optional_warnings.append(f"release mirror failed: {message}")
+                        release_warnings.append(f"release mirror failed: {message}")
                         logger.warning(
                             "Release mirror for GitHub repository %s failed after the primary "
                             "repository was preserved: %s",
@@ -363,6 +407,11 @@ class SyncService:
                 if self.settings.packages_enabled and kind == RepositoryKind.OWNED.value:
                     if self.container_mirror is None:
                         raise RuntimeError("Container package mirror was not initialized")
+                    logger.info(
+                        "Mirroring container packages: repository_id=%d upstream=%s",
+                        repository_id,
+                        full_name,
+                    )
                     package_warnings = await self.container_mirror.mirror(
                         repository_id,
                         github_id,
@@ -370,9 +419,12 @@ class SyncService:
                         destination,
                         str(user["login"]),
                     )
-                warning_message = self._warning_message(
-                    [*optional_warnings, *release_warnings, *package_warnings]
-                )
+                    logger.info(
+                        "Container package mirror complete: repository_id=%d warnings=%d",
+                        repository_id,
+                        len(package_warnings),
+                    )
+                warning_message = self._warning_message([*release_warnings, *package_warnings])
                 now = utcnow()
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)
@@ -402,6 +454,12 @@ class SyncService:
                         "Repository %d synchronization completed with warnings: %s",
                         repository_id,
                         warning_message,
+                    )
+                else:
+                    logger.info(
+                        "Repository synchronization completed: repository_id=%d upstream=%s",
+                        repository_id,
+                        full_name,
                     )
                 return True
             except Exception as exc:
@@ -461,6 +519,7 @@ class SyncService:
                 "owned": total_by_kind.get(RepositoryKind.OWNED.value, 0),
                 "starred": total_by_kind.get(RepositoryKind.STARRED.value, 0),
                 "active": total_by_status.get(RepositoryStatus.ACTIVE.value, 0),
+                "syncing": total_by_status.get(RepositoryStatus.SYNCING.value, 0),
                 "unavailable": total_by_status.get(RepositoryStatus.UNAVAILABLE.value, 0),
                 "unstarred": total_by_status.get(RepositoryStatus.UNSTARRED.value, 0),
                 "error": total_by_status.get(RepositoryStatus.ERROR.value, 0),

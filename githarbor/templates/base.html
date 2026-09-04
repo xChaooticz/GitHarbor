@@ -14,5 +14,28 @@
   </header>
   <main>{% block content %}{% endblock %}</main>
   <footer>Your self-hosted safe harbor for Git repositories.</footer>
+  {% if auto_refresh|default(false) %}
+  <script>
+    (() => {
+      let wasRunning = {{ sync_running|tojson }};
+      const refreshStatus = async () => {
+        try {
+          const response = await fetch("/api/status", {cache: "no-store"});
+          if (!response.ok) return;
+          const currentStatus = await response.json();
+          const isRunning = Boolean(currentStatus.sync_running);
+          if (isRunning || wasRunning) {
+            window.location.reload();
+            return;
+          }
+          wasRunning = isRunning;
+        } catch {
+          // Keep the existing page visible if a short network interruption occurs.
+        }
+      };
+      window.setInterval(refreshStatus, 10000);
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

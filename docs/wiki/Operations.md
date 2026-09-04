@@ -12,12 +12,21 @@ curl --fail http://127.0.0.1:9005/api/health
 ```
 
 The dashboard shows the last global run, connection state, repository status counts, and individual
-run history. Investigate repositories in `error`; `unavailable` and `unstarred` are preservation
-states and do not mean that the Gitea copy was deleted. A `partial` run with **Last warning** means
-the core mirror succeeded but one or more release assets were safely skipped.
+run history. It checks the status API every 10 seconds and refreshes itself while synchronization is
+running, then once more when it completes. **Syncing** is the number of in-flight transfers and
+falls as they finish; **Mirrored** is the number of successfully preserved repositories. Investigate
+repositories in `error`; `unavailable` and `unstarred` are preservation states and do not mean that
+the Gitea copy was deleted. A `partial` run with **Last warning** means the core mirror succeeded
+but one or more release assets were safely skipped.
 
 Logs are structured JSON and redact known token patterns. Still protect logs as operational data:
 repository names and failure details may be sensitive.
+
+At `LOG_LEVEL=INFO`, a normal startup emits a GitHarbor startup record. Every synchronization then
+logs discovery, destination preparation, Git, default-branch, wiki, release, and package stages,
+along with every repository's completion and the global result. Warnings and errors remain visible
+at this level. A quiet log after startup means no synchronization is currently running; use **Sync
+now** or wait for the configured schedule.
 
 ## Manual synchronization
 
@@ -105,7 +114,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.4
+git checkout v0.6.5
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave
@@ -196,7 +205,7 @@ git -C wiki-restore-test log --oneline --all
 
 Repositories with the GitHub wiki feature disabled, or enabled without any pages, are intentionally
 skipped. A populated wiki that cannot be cloned or pushed leaves the primary repository preserved,
-marks the run `partial`, and records a warning for later retry.
+marks the repository and run `error`, and records the failure for later retry.
 
 ## Verify release preservation
 

@@ -159,8 +159,12 @@ browser visit may return `401` or `404`; use `/OWNER/REPOSITORY/wiki` to view a 
 
 Read Gitea's log at the same timestamp. In particular, `fork/exec /usr/bin/git: no such file or
 directory` means the Gitea process could not run Git; verify `git --version` in the running Gitea
-container and restart or repair that container before retrying. GitHarbor records the failed wiki as
-a warning and continues preserving the primary repository.
+container and restart or repair that container before retrying. GitHarbor marks the repository and
+run as `error` so the incomplete wiki mirror is clearly visible.
+
+Some Gitea deployments enable the wiki unit without creating the backing `.wiki.git` repository.
+GitHarbor initializes that repository through Gitea's wiki-page API before it pushes the source wiki
+history. Upgrade to a GitHarbor version containing this fix, then retry the affected repository.
 
 ## Git push returns HTTP `504`
 
