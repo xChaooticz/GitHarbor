@@ -86,7 +86,7 @@ curl --fail http://127.0.0.1:9005/api/health
 
 Read the [changelog](https://github.com/xChaooticz/GitHarbor/blob/main/CHANGELOG.md), then back up
 GitHarbor's volume and Gitea. If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the new tag,
-for example `v0.6.1`. If it is `latest`, leave it unchanged; `docker compose pull` is still required
+for example `v0.6.2`. If it is `latest`, leave it unchanged; `docker compose pull` is still required
 because a running container does not update itself. Pull, recreate, and verify:
 
 ```sh
@@ -100,7 +100,7 @@ To build a release from source instead:
 
 ```sh
 git fetch --tags
-git checkout v0.6.1
+git checkout v0.6.2
 docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 

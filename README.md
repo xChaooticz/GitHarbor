@@ -73,7 +73,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.6.1` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.6.2` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
