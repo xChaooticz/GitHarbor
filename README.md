@@ -100,8 +100,16 @@ Subscribe to **Watch → Custom → Releases** on the
 installed version is returned by `http://DOCKER_HOST_IP:9005/api/health` and shown in the API docs.
 Before upgrading, read the [changelog](CHANGELOG.md) and back up GitHarbor's volume and Gitea.
 
-When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the new release tag. With `latest`, no
-tag edit is needed, but Docker still needs an explicit pull. Then recreate and verify the service:
+If the deployment was cloned from this repository, update its tracked Compose and documentation
+files first. The ignored `.env` file is retained:
+
+```sh
+git fetch --tags
+git checkout v0.6.2
+```
+
+When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
+no tag edit is needed, but Docker still needs an explicit pull. Then recreate and verify the service:
 
 ```sh
 docker compose pull githarbor
