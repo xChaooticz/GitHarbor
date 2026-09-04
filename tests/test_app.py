@@ -14,4 +14,7 @@ def test_application_constructs_and_registers_core_routes() -> None:
         "/api/repositories/{repository_id}",
         "/api/sync",
         "/api/repositories/{repository_id}/sync",
+        "/admin",
+        "/actions/admin/stop-sync",
+        "/actions/admin/purge-organization",
     } <= paths

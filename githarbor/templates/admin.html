@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Admin · GitHarbor{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><p class="eyebrow">Restricted operations</p><h1>Administration</h1>
+  <p class="muted">Controls here use GitHarbor's configured Gitea token without exposing it to the browser.</p></div>
+</section>
+{% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+<section class="panel">
+  <h2>Stop synchronization</h2>
+  <p class="muted">Cancels active repository transfers and leaves affected repositories marked as errors so they can be retried later. The scheduler and container keep running.</p>
+  <form class="action-form" method="post" action="/actions/admin/stop-sync">
+    <label>Administrative action token<input type="password" name="admin_token" autocomplete="current-password" required></label>
+    <button class="secondary" {% if not sync_running %}disabled{% endif %}>Stop active synchronization</button>
+  </form>
+</section>
+<section class="panel danger-panel">
+  <h2>Delete every repository in a destination organization</h2>
+  <p>This calls Gitea’s bulk organization deletion API. It permanently deletes <strong>every</strong> repository in the selected organization, including repositories not created by GitHarbor. It does not delete the organization itself.</p>
+  <p>Stop synchronization first. After Gitea finishes the deletion, run a sync to recreate and mirror the GitHarbor destinations.</p>
+  <form class="action-form" method="post" action="/actions/admin/purge-organization">
+    <label>Destination organization<select name="namespace">{% for namespace in namespaces %}<option value="{{ namespace }}">{{ namespace }}</option>{% endfor %}</select></label>
+    <label>Type <code>DELETE ALL REPOSITORIES IN &lt;organization&gt;</code><input type="text" name="confirmation" autocomplete="off" required></label>
+    <label>Administrative action token<input type="password" name="admin_token" autocomplete="current-password" required></label>
+    <button class="danger">Delete organization repositories</button>
+  </form>
+</section>
+{% endblock %}

@@ -60,6 +60,19 @@ def test_settings_accept_feature_flags_and_latest_asset_mode(tmp_path: Path) -> 
     assert settings.release_asset_mode is ReleaseAssetMode.LATEST
 
 
+def test_admin_actions_require_a_separate_confirmation_token(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="ADMIN_ACTIONS_TOKEN"):
+        Settings(**settings_values(tmp_path), admin_actions_enabled=True)  # type: ignore[arg-type]
+
+    settings = Settings(
+        **settings_values(tmp_path),
+        admin_actions_enabled=True,
+        admin_actions_token="admin-secret",
+    )  # type: ignore[arg-type]
+    assert settings.admin_actions_available is True
+    assert "admin-secret" not in repr(settings)
+
+
 def test_settings_reject_invalid_release_asset_mode(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         Settings(**settings_values(tmp_path), release_asset_mode="newest-three")  # type: ignore[arg-type]

@@ -11,7 +11,7 @@ from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
 from githarbor.config import Settings
 from githarbor.database import Database
-from githarbor.models import Base, Repository, RepositoryStatus
+from githarbor.models import Base, Repository, RepositoryStatus, RunStatus
 from githarbor.services.sync import SyncService
 
 
@@ -118,6 +118,53 @@ async def test_per_repository_sync_is_locked(tmp_path: Path, upstream: UpstreamR
     assert git.calls == 1
     with database.session_factory() as session:
         assert session.get(Repository, repository_id).status == RepositoryStatus.ACTIVE.value  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_stop_active_syncs_cancels_work_without_stopping_the_service(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="project",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    git = BlockingGit()
+    service = SyncService(
+        make_settings(tmp_path),
+        database,
+        FakeGitHub(upstream),
+        FakeGitea(),
+        git,  # type: ignore[arg-type]
+    )
+    assert service.start_repository_sync(repository_id, "test") is True
+    await asyncio.wait_for(git.started.wait(), timeout=2)
+
+    assert await service.stop_active_syncs() == 1
+    assert service.is_running is False
+    with database.session_factory() as session:
+        repository = session.get(Repository, repository_id)
+        assert repository is not None
+        assert repository.status == RepositoryStatus.ERROR.value
+        assert repository.last_error == "Synchronization stopped by an administrator"
+        assert repository.runs[0].status == RunStatus.SKIPPED.value
 
 
 @pytest.mark.asyncio

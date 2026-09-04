@@ -10,7 +10,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-mark">⚓</span><span>GitHarbor</span></a>
-    <nav><a href="/">Dashboard</a><a href="/repositories">Repositories</a><a href="/docs">API</a></nav>
+    <nav><a href="/">Dashboard</a><a href="/repositories">Repositories</a>{% if admin_actions_available|default(false) %}<a href="/admin">Admin</a>{% endif %}<a href="/docs">API</a></nav>
   </header>
   <main>{% block content %}{% endblock %}</main>
   <footer>Your self-hosted safe harbor for Git repositories.</footer>

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     git_timeout_seconds: int = Field(default=3600, ge=30)
     api_timeout_seconds: int = Field(default=30, ge=5)
     release_asset_timeout_seconds: int = Field(default=3600, ge=30)
+    admin_actions_enabled: bool = False
+    admin_actions_token: SecretStr | None = None
     log_level: str = "INFO"
 
     @field_validator("sync_interval", mode="before")
@@ -116,6 +118,19 @@ class Settings(BaseSettings):
                 "GITEA_URL cannot contain credentials when package mirroring is enabled"
             )
         return self
+
+    @model_validator(mode="after")
+    def validate_admin_actions(self) -> Settings:
+        if self.admin_actions_enabled and (
+            self.admin_actions_token is None
+            or not self.admin_actions_token.get_secret_value().strip()
+        ):
+            raise ValueError("ADMIN_ACTIONS_TOKEN is required when ADMIN_ACTIONS_ENABLED=true")
+        return self
+
+    @property
+    def admin_actions_available(self) -> bool:
+        return self.admin_actions_enabled and self.admin_actions_token is not None
 
     @property
     def database_url(self) -> str:

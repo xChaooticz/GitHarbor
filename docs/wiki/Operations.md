@@ -34,6 +34,20 @@ These mutation endpoints have no built-in authentication. The default LAN bindin
 only for a trusted private network. Use `GITHARBOR_BIND_ADDRESS=127.0.0.1` and an authenticated proxy
 for access across untrusted networks.
 
+## Stop a run or reset destinations
+
+With `ADMIN_ACTIONS_ENABLED=true` and a separate `ADMIN_ACTIONS_TOKEN` configured, the dashboard
+shows an **Admin** tab. The stop control cancels active repository transfers without stopping the
+container or scheduler. Interrupted repositories are marked `error` and their runs `skipped`, making
+them easy to retry after correcting the underlying problem.
+
+The same tab can call Gitea's bulk `DELETE /orgs/{org}/repos` operation for either configured
+GitHarbor destination organization. This is a reset, not a selective cleanup: it permanently removes
+every repository in that organization, including any manually created repository. Stop the sync,
+confirm the Gitea deletion has completed, then run a global sync to recreate the mirrors. Use only
+dedicated GitHarbor organizations and take a Gitea backup first. The Gitea token stays server-side;
+the browser must supply the separate admin-action token and exact confirmation text.
+
 ## Backups
 
 There are two independent things to protect:
@@ -91,7 +105,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.2
+git checkout v0.6.3
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave
@@ -181,7 +195,8 @@ git -C wiki-restore-test log --oneline --all
 ```
 
 Repositories with the GitHub wiki feature disabled, or enabled without any pages, are intentionally
-skipped. A populated wiki that cannot be cloned or pushed makes the repository sync fail visibly.
+skipped. A populated wiki that cannot be cloned or pushed leaves the primary repository preserved,
+marks the run `partial`, and records a warning for later retry.
 
 ## Verify release preservation
 

@@ -73,7 +73,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.6.2` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.6.3` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -105,7 +105,7 @@ files first. The ignored `.env` file is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.2
+git checkout v0.6.3
 ```
 
 When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
@@ -186,6 +186,8 @@ in the Docker host's configured credential store when a private deployment image
 | `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Per Skopeo registry operation timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Clone or push timeout per command |
+| `ADMIN_ACTIONS_ENABLED` | `false` | Enable guarded stop-sync and bulk organization-reset dashboard controls |
+| `ADMIN_ACTIONS_TOKEN` | required when admin actions are enabled | Separate token required for every admin action; never use `GITEA_TOKEN` |
 | `LOG_LEVEL` | `INFO` | JSON log threshold |
 
 Settings are validated on startup. Secrets have no defaults. Existing Gitea repositories are never
@@ -214,9 +216,11 @@ only that record `error`; the rest of a global run continues.
 ## Git semantics and LFS
 
 `git clone --mirror` followed by `git push --mirror` preserves ordinary Git objects and refs,
-including force pushes and upstream ref deletions. Deleting an upstream branch or tag therefore also
-deletes that ref from the GitHarbor-managed destination; deleting the destination repository itself
-never happens automatically.
+including force pushes and upstream ref deletions. GitHarbor retries a destination push after
+transient HTTP gateway failures such as 502, 503, or 504; a retry is safe because the mirror push is
+idempotent. Deleting an upstream branch or tag therefore also deletes that ref from the
+GitHarbor-managed destination; deleting the destination repository itself never happens
+automatically.
 
 GitHub's read-only `refs/pull/*` namespace conflicts with Gitea's own pull-request refs. GitHarbor
 preserves those commits under `refs/githarbor/github-pull/*` before pushing, avoiding Gitea hook
@@ -244,7 +248,8 @@ When pages exist, GitHarbor enables the native wiki unit on the managed Gitea de
 bare mirror push to preserve every wiki commit and ref. Like the primary Git mirror, this makes the
 GitHub wiki authoritative: an upstream wiki force-update or ref deletion is reflected in Gitea.
 GitHub wiki attachments committed into the wiki repository are ordinary Git objects and are
-preserved. A wiki clone or push failure marks that repository synchronization as an error.
+preserved. A wiki clone or push failure is recorded as a warning and marks the run `partial` after
+the primary repository has been preserved.
 Set `WIKI_ENABLED=false` to skip wiki checks and updates. Existing Gitea wiki data is retained.
 
 ## Release and release-asset mirroring
@@ -268,9 +273,10 @@ skipped without failing the Git or release-metadata mirror.
 
 Every skipped asset is written to the repository's persistent **Last warning**, and that repository
 run is marked `partial`; the repository itself remains `active` and later syncs retry the asset. A
-reverse proxy can enforce a smaller request limit than Gitea advertises, so a successful proactive
-check cannot guarantee the upload will be accepted. Adjust `RELEASE_ASSET_TIMEOUT_SECONDS` for slow
-large transfers.
+release-metadata API rejection is handled the same way, and its Gitea validation message is shown in
+the warning. A reverse proxy can enforce a smaller request limit than Gitea advertises, so a
+successful proactive check cannot guarantee the upload will be accepted. Adjust
+`RELEASE_ASSET_TIMEOUT_SECONDS` for slow large transfers.
 
 `RELEASE_ASSET_MODE=all` mirrors assets for every visible release. `latest` still mirrors metadata
 for every visible release but retains assets only on GitHub's latest published stable release, as

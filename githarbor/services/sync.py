@@ -57,8 +57,10 @@ class SyncService:
 
     @property
     def is_running(self) -> bool:
-        return self.global_lock.locked() or (
-            self._global_task is not None and not self._global_task.done()
+        return (
+            self.global_lock.locked()
+            or (self._global_task is not None and not self._global_task.done())
+            or any(not task.done() for task in self._repository_tasks.values())
         )
 
     def start_global_sync(self, trigger: str) -> bool:
@@ -86,6 +88,40 @@ class SyncService:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def stop_active_syncs(self) -> int:
+        """Cancel current work without stopping the service or its scheduler."""
+        tasks = [
+            task
+            for task in [self._global_task, *self._repository_tasks.values()]
+            if task is not None and not task.done()
+        ]
+        if not tasks:
+            return 0
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        message = "Synchronization stopped by an administrator"
+        now = utcnow()
+        with self.database.session_factory.begin() as session:
+            session.execute(
+                update(Repository)
+                .where(Repository.status == RepositoryStatus.SYNCING.value)
+                .values(
+                    status=RepositoryStatus.ERROR.value,
+                    last_error=message,
+                    last_warning=None,
+                    updated_at=now,
+                )
+            )
+            session.execute(
+                update(SyncRun)
+                .where(SyncRun.status == RunStatus.RUNNING.value)
+                .values(status=RunStatus.SKIPPED.value, message=message, finished_at=now)
+            )
+        logger.warning("Stopped %d active synchronization task(s)", len(tasks))
+        return len(tasks)
 
     def recover_interrupted_runs(self) -> None:
         now = utcnow()
@@ -256,6 +292,10 @@ class SyncService:
                     repository.destination_url = destination_repo.html_url
                 user = await self.gitea.authenticated_user()
                 self.gitea_status = "connected"
+                secrets = [
+                    self.settings.github_token.get_secret_value(),
+                    self.settings.gitea_token.get_secret_value(),
+                ]
                 await self.git.mirror(
                     source_url=upstream.clone_url,
                     source_token=self.settings.github_token.get_secret_value(),
@@ -267,35 +307,58 @@ class SyncService:
                     await self.gitea.set_default_branch(
                         namespace, destination, upstream.default_branch
                     )
+                optional_warnings: list[str] = []
                 if self.settings.wiki_enabled and upstream.has_wiki:
-                    has_wiki_content = await self.git.remote_has_refs(
-                        upstream.wiki_clone_url,
-                        self.settings.github_token.get_secret_value(),
-                    )
-                    if has_wiki_content:
-                        await self.gitea.enable_wiki(namespace, destination)
-                        await self.git.mirror_wiki(
-                            source_url=upstream.wiki_clone_url,
-                            source_token=self.settings.github_token.get_secret_value(),
-                            destination_url=destination_repo.wiki_clone_url,
-                            destination_token=self.settings.gitea_token.get_secret_value(),
-                            destination_username=str(user["login"]),
+                    try:
+                        has_wiki_content = await self.git.remote_has_refs(
+                            upstream.wiki_clone_url,
+                            self.settings.github_token.get_secret_value(),
                         )
-                        logger.info("Mirrored wiki for GitHub repository %s", upstream.full_name)
-                    else:
-                        logger.info(
-                            "Skipped enabled but empty wiki for GitHub repository %s",
+                        if has_wiki_content:
+                            await self.gitea.enable_wiki(namespace, destination)
+                            await self.git.mirror_wiki(
+                                source_url=upstream.wiki_clone_url,
+                                source_token=self.settings.github_token.get_secret_value(),
+                                destination_url=destination_repo.wiki_clone_url,
+                                destination_token=self.settings.gitea_token.get_secret_value(),
+                                destination_username=str(user["login"]),
+                            )
+                            logger.info(
+                                "Mirrored wiki for GitHub repository %s", upstream.full_name
+                            )
+                        else:
+                            logger.info(
+                                "Skipped enabled but empty wiki for GitHub repository %s",
+                                upstream.full_name,
+                            )
+                    except Exception as exc:
+                        message = redact(str(exc), secrets)[:1000]
+                        optional_warnings.append(f"wiki mirror failed: {message}")
+                        logger.warning(
+                            "Wiki mirror for GitHub repository %s failed after the primary "
+                            "repository was preserved: %s",
                             upstream.full_name,
+                            message,
                         )
                 release_warnings: list[str] = []
                 if self.settings.releases_enabled:
-                    release_warnings = await self.release_mirror.mirror(
-                        upstream.full_name,
-                        namespace,
-                        destination,
-                        mirror_assets=self.settings.release_assets_enabled,
-                        asset_mode=self.settings.release_asset_mode,
-                    )
+                    try:
+                        release_warnings = await self.release_mirror.mirror(
+                            upstream.full_name,
+                            namespace,
+                            destination,
+                            mirror_assets=self.settings.release_assets_enabled,
+                            asset_mode=self.settings.release_asset_mode,
+                        )
+                    except Exception as exc:
+                        message = redact(str(exc), secrets)[:1000]
+                        optional_warnings.append(f"release mirror failed: {message}")
+                        logger.warning(
+                            "Release mirror for GitHub repository %s failed after the primary "
+                            "repository was preserved: %s",
+                            upstream.full_name,
+                            message,
+                        )
                 package_warnings: list[str] = []
                 if self.settings.packages_enabled and kind == RepositoryKind.OWNED.value:
                     if self.container_mirror is None:
@@ -307,7 +370,9 @@ class SyncService:
                         destination,
                         str(user["login"]),
                     )
-                warning_message = self._warning_message([*release_warnings, *package_warnings])
+                warning_message = self._warning_message(
+                    [*optional_warnings, *release_warnings, *package_warnings]
+                )
                 now = utcnow()
                 with self.database.session_factory.begin() as session:
                     repository = session.get(Repository, repository_id)

@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-09-04
+
+### Added
+
+- An opt-in, separately token-protected Admin dashboard for stopping active synchronization without
+  stopping the container, and for explicitly resetting every repository in one configured destination
+  organization.
+
+### Changed
+
+- Wiki and release-metadata failures now leave a successfully mirrored primary repository active and
+  mark the repository run partial with a persistent warning.
+
+### Fixed
+
+- Gitea API errors now include its concise validation message, making rejected release creation
+  actionable without logging request bodies or credentials.
+- Destination Git mirror pushes retry transient HTTP 502, 503, and 504 gateway interruptions.
+
 ## [0.6.2] - 2026-09-04
 
 ### Added
@@ -178,7 +197,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.1...v0.6.0

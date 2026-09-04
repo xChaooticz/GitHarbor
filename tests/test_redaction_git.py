@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -121,7 +122,7 @@ async def test_lfs_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -
     mirror = GitMirror(lfs_enabled=False)
     commands: list[Sequence[str]] = []
 
-    async def record(command: Sequence[str], *_arguments: object) -> None:
+    async def record(command: Sequence[str], *_arguments: object, **_kwargs: object) -> None:
         commands.append(command)
 
     async def skip_ref_remap(*_arguments: object) -> None:
@@ -139,3 +140,29 @@ async def test_lfs_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -
 
     assert len(commands) == 2
     assert all("lfs" not in command for command in commands)
+
+
+@pytest.mark.asyncio
+async def test_mirror_push_retries_a_transient_gateway_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mirror = GitMirror()
+    results = iter(
+        [
+            (1, b"", b"error: RPC failed; HTTP 504\nfatal: the remote end hung up unexpectedly"),
+            (0, b"", b""),
+        ]
+    )
+
+    async def execute(*_arguments: object) -> tuple[int, bytes, bytes]:
+        return next(results)
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(mirror, "_execute", execute)
+    monkeypatch.setattr("githarbor.services.git.asyncio.sleep", sleep)
+
+    await mirror._run(
+        ["git", "push"], tmp_path, {}, [], retry_transient=True
+    )
+
+    sleep.assert_awaited_once_with(1)

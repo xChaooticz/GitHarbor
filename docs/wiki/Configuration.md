@@ -8,7 +8,7 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.6.2` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.6.3` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` are also Compose-only settings. They default to
 `0.0.0.0` and `9005`, making the dashboard reachable from the private LAN.
@@ -49,6 +49,8 @@ before filling in token values.
 | `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Timeout for each registry operation; minimum 30 |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload reachable LFS objects before pushing refs |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Timeout for each Git or Git LFS command; minimum 30 |
+| `ADMIN_ACTIONS_ENABLED` | `false` | Enable restricted dashboard controls to stop syncs and reset an entire destination organization |
+| `ADMIN_ACTIONS_TOKEN` | required when enabled | Separate secret required for each restricted action; do not reuse `GITEA_TOKEN` |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
 
 ## Complete example
@@ -84,6 +86,8 @@ PACKAGE_MAX_BYTES=0
 PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
+ADMIN_ACTIONS_ENABLED=false
+ADMIN_ACTIONS_TOKEN=
 LOG_LEVEL=INFO
 ```
 
@@ -153,6 +157,19 @@ have its own limit, so the destination can still reject an image. Such a failure
 partial repository run and retried later. See
 [Container packages](https://github.com/xChaooticz/GitHarbor/wiki/Container-Packages).
 
+## Restricted dashboard actions
+
+`ADMIN_ACTIONS_ENABLED=false` is the safe default. Set it to `true` only on a trusted private
+network and provide a distinct, random `ADMIN_ACTIONS_TOKEN`. The **Admin** dashboard tab then asks
+for that value on every operation; `GITEA_TOKEN` remains inside the GitHarbor container and is never
+sent to the browser.
+
+The stop action cancels active transfers but keeps the container and schedule running. The bulk
+organization reset calls Gitea's `DELETE /orgs/{org}/repos` endpoint for exactly one of the two
+configured GitHarbor destination namespaces. It deletes every repository in that organization,
+including manually created repositories, and is therefore protected by an exact typed confirmation.
+Use dedicated organizations for GitHarbor and keep backups before using it.
+
 ## Timeouts
 
 `API_TIMEOUT_SECONDS` covers individual HTTP API calls. GitHarbor retries transient API and rate
@@ -169,8 +186,10 @@ the source and destination through the GitHarbor container; ensure its network p
 transfer.
 
 `GIT_TIMEOUT_SECONDS` applies to each clone, LFS transfer, and push command. Increase it when large
-repositories fail at a repeatable duration. Also confirm that the container host has enough temporary
-space for one bare repository and its reachable LFS objects.
+repositories fail at a repeatable duration. GitHarbor retries transient destination 502, 503, and
+504 push failures, but the Gitea reverse proxy must also permit the transfer duration and request
+size. Also confirm that the container host has enough temporary space for one bare repository and
+its reachable LFS objects.
 
 ## Database and Compose volume
 

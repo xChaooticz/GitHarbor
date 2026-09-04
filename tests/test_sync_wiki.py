@@ -77,6 +77,11 @@ class RecordingGit:
         self.wiki_mirrors.append(kwargs)
 
 
+class FailingWikiGit(RecordingGit):
+    async def mirror_wiki(self, **_kwargs: Any) -> None:
+        raise RuntimeError("destination wiki endpoint returned HTTP 500")
+
+
 class WarningReleaseMirror:
     async def mirror(self, _source: str, _namespace: str, _name: str, **_kwargs: Any) -> list[str]:
         return ["release 'v1.0.0' asset 'large.iso' skipped: HTTP 413"]
@@ -85,6 +90,11 @@ class WarningReleaseMirror:
 class ForbiddenReleaseMirror:
     async def mirror(self, *_args: Any, **_kwargs: Any) -> list[str]:
         raise AssertionError("release mirroring should be disabled")
+
+
+class FailingReleaseMirror:
+    async def mirror(self, *_args: Any, **_kwargs: Any) -> list[str]:
+        raise RuntimeError("Gitea API returned HTTP 422: repo is empty")
 
 
 class RecordingReleaseMirror:
@@ -278,6 +288,54 @@ async def test_release_asset_warning_is_persisted_as_partial_run(
         assert "large.iso" in (repository.last_warning or "")
         assert repository.status == RepositoryStatus.ACTIVE.value
         assert len(repository.runs) == 1
+        assert repository.runs[0].status == RunStatus.PARTIAL.value
+
+
+@pytest.mark.asyncio
+async def test_wiki_or_release_failure_does_not_hide_primary_repository_mirror(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    upstream = replace(upstream, has_wiki=True)
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="project",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    git = FailingWikiGit(True)
+    service = SyncService(
+        make_settings(tmp_path),
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        RecordingGitea(),  # type: ignore[arg-type]
+        git,  # type: ignore[arg-type]
+    )
+    service.release_mirror = FailingReleaseMirror()  # type: ignore[assignment]
+
+    assert await service.sync_repository(repository_id, "test") is True
+    assert git.primary_mirrors == 1
+    with database.session_factory() as session:
+        repository = session.get(Repository, repository_id)
+        assert repository is not None
+        assert repository.status == RepositoryStatus.ACTIVE.value
+        assert "wiki mirror failed" in (repository.last_warning or "")
+        assert "release mirror failed" in (repository.last_warning or "")
         assert repository.runs[0].status == RunStatus.PARTIAL.value
 
 

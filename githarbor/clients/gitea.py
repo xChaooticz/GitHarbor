@@ -8,6 +8,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
+from githarbor.services.redaction import redact
+
 
 class GiteaError(RuntimeError):
     pass
@@ -336,6 +338,14 @@ class GiteaClient:
             f"/{quote(version, safe='')}",
         )
 
+    async def delete_organization_repositories(self, namespace: str) -> None:
+        """Delete every repository in an organization.
+
+        This intentionally mirrors Gitea's bulk-organization endpoint. Callers must provide
+        their own explicit authorization and confirmation before using it.
+        """
+        await self._empty_request("DELETE", f"orgs/{quote(namespace, safe='')}/repos")
+
     async def ensure_repository(
         self,
         namespace: str,
@@ -509,6 +519,20 @@ class GiteaClient:
                 await asyncio.sleep(2**attempt)
                 continue
             if response.is_error:
-                raise GiteaError(f"Gitea API returned HTTP {response.status_code}")
+                message = self._error_message(response)
+                suffix = f": {message}" if message else ""
+                raise GiteaError(f"Gitea API returned HTTP {response.status_code}{suffix}")
             return response
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _error_message(response: httpx.Response) -> str | None:
+        """Return Gitea's concise API error message without exposing response data wholesale."""
+        try:
+            payload = response.json()
+        except (ValueError, httpx.DecodingError):
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
+            return None
+        message = redact(payload["message"]).replace("\n", " ").strip()
+        return message[:500] or None

@@ -127,6 +127,7 @@ class GitMirror:
                 root,
                 self._environment(askpass, destination_username, destination_token),
                 [destination_token],
+                retry_transient=True,
             )
 
     @staticmethod
@@ -302,13 +303,34 @@ class GitMirror:
         env: Mapping[str, str],
         secrets: list[str],
         input_data: bytes | None = None,
+        retry_transient: bool = False,
     ) -> None:
-        returncode, stdout, stderr = await self._execute(command, cwd, env, input_data)
-        if returncode:
+        for attempt in range(3):
+            returncode, stdout, stderr = await self._execute(command, cwd, env, input_data)
+            if not returncode:
+                return
             detail = stderr.decode("utf-8", errors="replace").strip()
             if not detail:
                 detail = stdout.decode("utf-8", errors="replace").strip()
-            raise GitError(redact(detail or "Git command failed", secrets)[:4000])
+            message = redact(detail or "Git command failed", secrets)[:4000]
+            if not retry_transient or attempt == 2 or not self._is_transient_push_failure(message):
+                raise GitError(message)
+            await asyncio.sleep(2**attempt)
+
+    @staticmethod
+    def _is_transient_push_failure(message: str) -> bool:
+        normalized = message.casefold()
+        return any(
+            pattern in normalized
+            for pattern in (
+                "http 502",
+                "http 503",
+                "http 504",
+                "unexpected disconnect",
+                "remote end hung up unexpectedly",
+                "connection reset by peer",
+            )
+        )
 
     async def _execute(
         self,

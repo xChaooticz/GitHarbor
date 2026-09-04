@@ -11,6 +11,7 @@ from githarbor.clients.gitea import (
     DestinationSafetyError,
     GiteaAssetTooLarge,
     GiteaClient,
+    GiteaError,
     managed_repository_description,
     management_marker,
 )
@@ -72,6 +73,41 @@ async def test_set_default_branch_updates_repository() -> None:
     )
     await client.set_default_branch("archive", "project", "develop")
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_gitea_validation_errors_include_the_safe_api_message() -> None:
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(422, json={"message": "repo is empty"})
+        ),
+    )
+
+    with pytest.raises(GiteaError, match="HTTP 422: repo is empty"):
+        await client.create_release("archive", "project", {"tag_name": "v1.0"})
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_organization_repositories_uses_only_configured_namespace() -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.raw_path.decode()))
+        return httpx.Response(202)
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    await client.delete_organization_repositories("backup org")
+    await client.close()
+
+    assert requests == [("DELETE", "/orgs/backup%20org/repos")]
 
 
 @pytest.mark.asyncio
