@@ -114,7 +114,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.5
+git checkout v0.6.6
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave

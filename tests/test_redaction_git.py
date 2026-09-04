@@ -37,6 +37,31 @@ def test_git_command_construction_uses_argument_arrays() -> None:
     assert all("secret" not in part for part in clone + push)
 
 
+def test_wiki_push_keeps_the_destination_default_branch() -> None:
+    path = Path("/tmp/wiki.git")
+    command = GitMirror.wiki_push_command(
+        path,
+        "https://gitea.test/archive/project.wiki.git",
+        "refs/heads/master",
+        "refs/heads/main",
+    )
+
+    assert command == [
+        "git",
+        "-C",
+        str(path),
+        "push",
+        "--no-verify",
+        "--force",
+        "--",
+        "https://gitea.test/archive/project.wiki.git",
+        "refs/heads/*:refs/heads/*",
+        "refs/tags/*:refs/tags/*",
+        "refs/heads/master:refs/heads/main",
+    ]
+    assert "--mirror" not in command
+
+
 def test_lfs_commands_pin_http_endpoints_and_use_a_named_destination_remote() -> None:
     path = Path("/tmp/repository.git")
     source_url = "https://github.test/a/b.git"

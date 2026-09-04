@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-09-04
+
+### Fixed
+
+- Wiki mirroring no longer tries to delete Gitea's current wiki branch when its default branch name
+  differs from the upstream wiki branch.
+
 ## [0.6.5] - 2026-09-04
 
 ### Changed
@@ -223,7 +230,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.2...v0.6.3

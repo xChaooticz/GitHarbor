@@ -24,12 +24,14 @@ async def test_wiki_mirror_preserves_history_and_detects_empty_source(tmp_path: 
     source_bare = tmp_path / "source.wiki.git"
     empty_bare = tmp_path / "empty.wiki.git"
     destination_bare = tmp_path / "destination.wiki.git"
+    destination_work = tmp_path / "destination-work"
     restored = tmp_path / "restored"
     source_work.mkdir()
 
     run_git("init", "--bare", str(source_bare))
     run_git("init", "--bare", str(empty_bare))
     run_git("init", "--bare", str(destination_bare))
+    run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=destination_bare)
     run_git("init", "--initial-branch=master", cwd=source_work)
     run_git("config", "user.name", "GitHarbor Test", cwd=source_work)
     run_git("config", "user.email", "githarbor@example.test", cwd=source_work)
@@ -40,6 +42,17 @@ async def test_wiki_mirror_preserves_history_and_detects_empty_source(tmp_path: 
     run_git("commit", "-am", "Expand wiki", cwd=source_work)
     run_git("remote", "add", "origin", str(source_bare), cwd=source_work)
     run_git("push", "origin", "master", cwd=source_work)
+
+    destination_work.mkdir()
+    run_git("init", "--initial-branch=main", cwd=destination_work)
+    run_git("config", "user.name", "GitHarbor Test", cwd=destination_work)
+    run_git("config", "user.email", "githarbor@example.test", cwd=destination_work)
+    (destination_work / "GitHarbor-initialization.md").write_text("temporary\n", encoding="utf-8")
+    run_git("add", "GitHarbor-initialization.md", cwd=destination_work)
+    run_git("commit", "-m", "Initialize wiki", cwd=destination_work)
+    run_git("remote", "add", "origin", str(destination_bare), cwd=destination_work)
+    run_git("push", "origin", "main", cwd=destination_work)
+    run_git("config", "receive.denyDeleteCurrent", "refuse", cwd=destination_bare)
 
     mirror = GitMirror(timeout_seconds=60, lfs_enabled=True)
     assert await mirror.remote_has_refs(str(source_bare), "") is True
@@ -62,3 +75,18 @@ async def test_wiki_mirror_preserves_history_and_detects_empty_source(tmp_path: 
         check=True,
     ).stdout.splitlines()
     assert history == ["Expand wiki", "Create wiki"]
+    source_head = subprocess.run(
+        ["git", "rev-parse", "refs/heads/master"],
+        cwd=source_bare,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    destination_head = subprocess.run(
+        ["git", "rev-parse", "refs/heads/main"],
+        cwd=destination_bare,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert destination_head == source_head

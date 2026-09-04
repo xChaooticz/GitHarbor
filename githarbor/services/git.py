@@ -40,6 +40,7 @@ class GitMirror:
             destination_username=destination_username,
             transfer_lfs=self.lfs_enabled,
             directory_name="repository.git",
+            preserve_destination_head=False,
         )
 
     async def mirror_wiki(
@@ -58,6 +59,7 @@ class GitMirror:
             destination_username=destination_username,
             transfer_lfs=False,
             directory_name="wiki.git",
+            preserve_destination_head=True,
         )
 
     async def remote_has_refs(self, source_url: str, source_token: str) -> bool:
@@ -86,6 +88,7 @@ class GitMirror:
         *,
         transfer_lfs: bool,
         directory_name: str,
+        preserve_destination_head: bool,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="githarbor-") as temporary:
             root = Path(temporary)
@@ -122,8 +125,22 @@ class GitMirror:
                 self._environment(askpass, "x-access-token", source_token),
                 [source_token],
             )
+            push_command = self.push_command(mirror_path, destination_url)
+            if preserve_destination_head:
+                source_head = await self._local_head_ref(
+                    mirror_path, root, self._environment(askpass, "x-access-token", source_token)
+                )
+                destination_head = await self._destination_head_ref(
+                    destination_url,
+                    root,
+                    self._environment(askpass, destination_username, destination_token),
+                    [destination_token],
+                )
+                push_command = self.wiki_push_command(
+                    mirror_path, destination_url, source_head, destination_head
+                )
             await self._run(
-                self.push_command(mirror_path, destination_url),
+                push_command,
                 root,
                 self._environment(askpass, destination_username, destination_token),
                 [destination_token],
@@ -146,6 +163,64 @@ class GitMirror:
             "--",
             destination_url,
         ]
+
+    @staticmethod
+    def wiki_push_command(
+        mirror_path: Path, destination_url: str, source_head: str, destination_head: str
+    ) -> list[str]:
+        refspecs = ["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]
+        if source_head != destination_head:
+            refspecs.append(f"{source_head}:{destination_head}")
+        return [
+            "git",
+            "-C",
+            str(mirror_path),
+            "push",
+            "--no-verify",
+            "--force",
+            "--",
+            destination_url,
+            *refspecs,
+        ]
+
+    async def _local_head_ref(self, mirror_path: Path, cwd: Path, env: Mapping[str, str]) -> str:
+        returncode, stdout, stderr = await self._execute(
+            ["git", "-C", str(mirror_path), "symbolic-ref", "HEAD"], cwd, env
+        )
+        if returncode:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise GitError(redact(detail or "Unable to determine source wiki branch", [])[:4000])
+        return self._parse_head_ref(stdout, "source wiki")
+
+    async def _destination_head_ref(
+        self,
+        destination_url: str,
+        cwd: Path,
+        env: Mapping[str, str],
+        secrets: list[str],
+    ) -> str:
+        returncode, stdout, stderr = await self._execute(
+            ["git", "ls-remote", "--symref", "--", destination_url, "HEAD"], cwd, env
+        )
+        if returncode:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise GitError(
+                redact(detail or "Unable to determine destination wiki branch", secrets)[:4000]
+            )
+        for line in stdout.decode("utf-8", errors="replace").splitlines():
+            prefix, separator, name = line.partition("\t")
+            if separator and name == "HEAD" and prefix.startswith("ref: "):
+                return self._parse_head_ref(
+                    prefix.removeprefix("ref: ").encode(), "destination wiki"
+                )
+        raise GitError("Destination wiki did not advertise its default branch")
+
+    @staticmethod
+    def _parse_head_ref(value: bytes, description: str) -> str:
+        ref = value.decode("utf-8", errors="replace").strip()
+        if not ref.startswith("refs/heads/"):
+            raise GitError(f"Invalid {description} default branch: {ref or 'missing'}")
+        return ref
 
     @staticmethod
     def list_special_refs_command(mirror_path: Path) -> list[str]:

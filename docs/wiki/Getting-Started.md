@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.6.5
+git checkout v0.6.6
 ```
 
 ## 3. Prepare Gitea
@@ -150,7 +150,7 @@ source instead, add `--build`:
 docker compose up -d --build
 ```
 
-For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.5`.
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.6`.
 If the GitHarbor GHCR package is private, authenticate the Docker host before running Compose:
 
 ```sh
