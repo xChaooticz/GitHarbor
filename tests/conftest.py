@@ -17,6 +17,7 @@ def upstream() -> UpstreamRepository:
         full_name="octo-user/project",
         html_url="https://github.example/octo-user/project",
         clone_url="https://github.example/octo-user/project.git",
+        description="An example project",
         default_branch="main",
         private=False,
         archived=False,

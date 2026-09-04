@@ -30,6 +30,7 @@ deletes a destination repository.
 - Opt-in multi-platform container mirroring for packages linked to owned repositories, with
   all-image or latest-image retention
 - Stable GitHub repository IDs for rename/transfer detection
+- GitHub repository descriptions copied into Gitea with clear mirror provenance
 - Collision-proof starred naming and guarded Gitea ownership markers
 - Independent, paginated owned/starred discovery with transient API retries and rate-limit reporting
 - SQLite state with WAL mode and versioned Alembic migrations
@@ -91,6 +92,26 @@ untrusted network or the internet.
 
 The named volume `githarbor-data` contains SQLite state. Gitea itself stores the preserved Git data.
 Back up both the Gitea installation and this volume.
+
+## Updating GitHarbor
+
+Subscribe to **Watch → Custom → Releases** on the
+[GitHub repository](https://github.com/xChaooticz/GitHarbor) to be notified about new versions. The
+installed version is returned by `http://DOCKER_HOST_IP:9005/api/health` and shown in the API docs.
+Before upgrading, read the [changelog](CHANGELOG.md) and back up GitHarbor's volume and Gitea.
+
+When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the new release tag. With `latest`, no
+tag edit is needed, but Docker still needs an explicit pull. Then recreate and verify the service:
+
+```sh
+docker compose pull githarbor
+docker compose up -d --no-deps --wait --wait-timeout 180 githarbor
+docker compose logs --tail 100 githarbor
+curl --fail http://127.0.0.1:9005/api/health
+```
+
+See [Operations: Upgrade GitHarbor](docs/wiki/Operations.md#upgrade-githarbor) for backup guidance,
+source-built deployments, database migrations, and post-upgrade checks.
 
 ## Credentials and permissions
 
@@ -171,9 +192,11 @@ adds the stable-ID suffix `--gh123456` only when normalization or an existing de
 real collision. Existing legacy names are shortened automatically when the clean destination is
 available; assignments remain fixed across later upstream renames and transfers.
 
-Every created Gitea description contains a management marker with the GitHub ID and repository kind.
-Before every push, an existing destination must have the exact expected marker. A missing or
-mismatched marker stops the operation rather than overwriting an unrelated repository.
+Each Gitea description starts with the GitHub repository's description and ends with readable mirror
+provenance plus a management marker containing the GitHub ID and repository kind. Description
+changes made on GitHub are copied on the next sync. Before every push, an existing destination must
+have the exact expected marker; a missing or mismatched marker stops the operation rather than
+overwriting an unrelated repository.
 
 Successful discovery updates records by `(github_id, kind)`. Missing owned repositories become
 `unavailable`; missing starred repositories become `unstarred`. Neither transition calls a Gitea

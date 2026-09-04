@@ -21,9 +21,10 @@ renames and transfers.
 ## Push ownership proof
 
 A repository path existing in Gitea is insufficient proof that GitHarbor may overwrite it. Creation
-adds `github-id` and `kind` to the description. Every later push checks both values. This makes manual
-description removal fail safely and prevents an unrelated repository from being selected by a name
-collision.
+copies the source description and appends readable provenance plus a deterministic marker containing
+`github-id` and `kind`. Every later push checks both values before refreshing the description from
+GitHub. This makes manual marker removal fail safely and prevents an unrelated repository from being
+selected by a name collision.
 
 ## Mirroring and credentials
 

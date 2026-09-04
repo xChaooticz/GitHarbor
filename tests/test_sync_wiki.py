@@ -228,6 +228,7 @@ async def test_sync_migrates_legacy_starred_name_and_persists_destination(
     assert await service.sync_repository(repository_id, "test") is True
     assert gitea.ensure_calls[0]["name"] == "octo-user--project"
     assert gitea.ensure_calls[0]["fallback_name"] == "octo-user--project--gh123"
+    assert gitea.ensure_calls[0]["source_description"] == "An example project"
     with database.session_factory() as session:
         repository = session.get(Repository, repository_id)
         assert repository is not None

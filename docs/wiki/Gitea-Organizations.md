@@ -60,9 +60,11 @@ intent easier to audit.
 
 ## Do not pre-create destination repositories
 
-GitHarbor creates each repository with a management marker in its Gitea description. Before every
-push, it requires the marker to match the stable GitHub repository ID and repository kind. This
-prevents an accidental mirror push from overwriting an unrelated repository.
+GitHarbor copies the GitHub repository description into Gitea and appends readable source provenance
+plus a management marker. Before every push, it requires the marker to match the stable GitHub
+repository ID and repository kind. This prevents an accidental mirror push from overwriting an
+unrelated repository. GitHub description changes are applied during the next sync; removing the
+marker manually makes later syncs fail closed.
 
 If you manually create a repository at a path GitHarbor wants, synchronization stops with a marker
 error. Rename or remove the unrelated empty repository through Gitea after confirming its contents;

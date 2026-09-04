@@ -244,6 +244,7 @@ class SyncService:
                     github_id=github_id,
                     kind=kind,
                     source_full_name=upstream.full_name,
+                    source_description=upstream.description,
                     private=self.settings.destination_private,
                     fallback_name=fallback_destination,
                 )

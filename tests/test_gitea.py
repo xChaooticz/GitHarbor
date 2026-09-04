@@ -11,12 +11,23 @@ from githarbor.clients.gitea import (
     DestinationSafetyError,
     GiteaAssetTooLarge,
     GiteaClient,
+    managed_repository_description,
     management_marker,
 )
 
 
 def test_management_marker_uses_stable_identity() -> None:
     assert management_marker(123, "starred") == "GitHarbor managed; github-id:123; kind:starred"
+
+
+def test_managed_description_preserves_source_text_and_provenance() -> None:
+    assert managed_repository_description(
+        "An example project", "octo-user/project", 123, "starred"
+    ) == (
+        "An example project\n\n"
+        "Mirrored from GitHub: octo-user/project. "
+        "GitHarbor managed; github-id:123; kind:starred"
+    )
 
 
 def test_destination_wiki_clone_url() -> None:
@@ -67,6 +78,9 @@ async def test_set_default_branch_updates_repository() -> None:
 async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_available() -> None:
     requests: list[tuple[str, str, bytes]] = []
     marker = management_marker(123, "starred")
+    description = managed_repository_description(
+        "An example project", "octo-user/project", 123, "starred"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append((request.method, request.url.path, request.content))
@@ -84,7 +98,7 @@ async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_avail
         return httpx.Response(
             200,
             json={
-                "description": marker,
+                "description": description,
                 "clone_url": "https://gitea.test/archive/octo-user--project.git",
                 "html_url": "https://gitea.test/archive/octo-user--project",
             },
@@ -102,6 +116,7 @@ async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_avail
         github_id=123,
         kind="starred",
         source_full_name="octo-user/project",
+        source_description="An example project",
         private=True,
     )
     await client.close()
@@ -113,7 +128,11 @@ async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_avail
         (
             "PATCH",
             "/repos/archive/octo-user--project--gh123",
-            b'{"name":"octo-user--project"}',
+            (
+                b'{"name":"octo-user--project","description":"An example project\\n\\n'
+                b"Mirrored from GitHub: octo-user/project. GitHarbor managed; github-id:123; "
+                b'kind:starred"}'
+            ),
         ),
     ]
 
@@ -121,7 +140,9 @@ async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_avail
 @pytest.mark.asyncio
 async def test_unrelated_preferred_repository_keeps_managed_collision_name() -> None:
     requests: list[tuple[str, str]] = []
-    marker = management_marker(123, "starred")
+    description = managed_repository_description(
+        "An example project", "octo-user/project", 123, "starred"
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append((request.method, request.url.path))
@@ -130,7 +151,7 @@ async def test_unrelated_preferred_repository_keeps_managed_collision_name() -> 
         return httpx.Response(
             200,
             json={
-                "description": marker,
+                "description": description,
                 "clone_url": "https://gitea.test/archive/octo-user--project--gh123.git",
                 "html_url": "https://gitea.test/archive/octo-user--project--gh123",
             },
@@ -148,6 +169,7 @@ async def test_unrelated_preferred_repository_keeps_managed_collision_name() -> 
         github_id=123,
         kind="starred",
         source_full_name="octo-user/project",
+        source_description="An example project",
         private=True,
     )
     await client.close()
@@ -156,6 +178,56 @@ async def test_unrelated_preferred_repository_keeps_managed_collision_name() -> 
     assert requests == [
         ("GET", "/repos/archive/octo-user--project"),
         ("GET", "/repos/archive/octo-user--project--gh123"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_existing_repository_description_follows_github() -> None:
+    requests: list[tuple[str, bytes]] = []
+    marker = management_marker(123, "owned")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.content))
+        if request.method == "GET":
+            description = f"Old source description\n\n{marker}"
+        else:
+            description = managed_repository_description(
+                "Current source description", "octo-user/project", 123, "owned"
+            )
+        return httpx.Response(
+            200,
+            json={
+                "description": description,
+                "clone_url": "https://gitea.test/archive/project.git",
+                "html_url": "https://gitea.test/archive/project",
+            },
+        )
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    await client.ensure_repository(
+        namespace="archive",
+        name="project",
+        github_id=123,
+        kind="owned",
+        source_full_name="octo-user/project",
+        source_description="Current source description",
+        private=True,
+    )
+    await client.close()
+
+    assert requests == [
+        ("GET", b""),
+        (
+            "PATCH",
+            (
+                b'{"description":"Current source description\\n\\nMirrored from GitHub: '
+                b'octo-user/project. GitHarbor managed; github-id:123; kind:owned"}'
+            ),
+        ),
     ]
 
 

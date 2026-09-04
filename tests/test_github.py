@@ -19,6 +19,7 @@ def payload(repo_id: int, owner: str, name: str) -> dict[str, object]:
         "full_name": f"{owner}/{name}",
         "html_url": f"https://github.test/{owner}/{name}",
         "clone_url": f"https://github.test/{owner}/{name}.git",
+        "description": f"The {name} repository",
         "default_branch": "main",
         "private": False,
         "archived": False,
@@ -73,6 +74,7 @@ async def test_starred_discovery() -> None:
     result = await client.list_starred()
     await client.close()
     assert result[0].full_name == "someone/project"
+    assert result[0].description == "The project repository"
     assert result[0].has_wiki is True
     assert result[0].wiki_clone_url == "https://github.test/someone/project.wiki.git"
 

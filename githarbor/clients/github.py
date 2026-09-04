@@ -82,6 +82,7 @@ class UpstreamRepository:
     full_name: str
     html_url: str
     clone_url: str
+    description: str | None
     default_branch: str | None
     private: bool
     archived: bool
@@ -104,6 +105,7 @@ class UpstreamRepository:
             full_name=str(data["full_name"]),
             html_url=str(data["html_url"]),
             clone_url=str(data["clone_url"]),
+            description=str(data["description"]) if data.get("description") else None,
             default_branch=data.get("default_branch"),
             private=bool(data.get("private", False)),
             archived=bool(data.get("archived", False)),

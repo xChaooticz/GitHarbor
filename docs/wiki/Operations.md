@@ -76,14 +76,24 @@ rather than relying on reconstruction.
 
 ## Upgrade GitHarbor
 
-Read the [changelog](https://github.com/xChaooticz/GitHarbor/blob/main/CHANGELOG.md) before upgrading,
-then back up the volume. For the published image, set `GITHARBOR_IMAGE_TAG` in `.env` to a specific
-release and pull it:
+Use **Watch → Custom → Releases** on the
+[GitHub repository](https://github.com/xChaooticz/GitHarbor) to receive new-release notifications.
+Compare the latest release with the installed version returned by the health endpoint:
+
+```sh
+curl --fail http://127.0.0.1:9005/api/health
+```
+
+Read the [changelog](https://github.com/xChaooticz/GitHarbor/blob/main/CHANGELOG.md), then back up
+GitHarbor's volume and Gitea. If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the new tag,
+for example `v0.6.1`. If it is `latest`, leave it unchanged; `docker compose pull` is still required
+because a running container does not update itself. Pull, recreate, and verify:
 
 ```sh
 docker compose pull githarbor
 docker compose up -d --no-deps --wait --wait-timeout 180 githarbor
 docker compose logs --tail 100 githarbor
+curl --fail http://127.0.0.1:9005/api/health
 ```
 
 To build a release from source instead:
@@ -94,8 +104,9 @@ git checkout v0.6.1
 docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 
-GitHarbor applies Alembic database migrations automatically at startup. Do not downgrade across a
-database migration unless the release notes explicitly document a safe downgrade path.
+The volume remains attached when Compose replaces the container. GitHarbor applies Alembic database
+migrations automatically at startup. Do not downgrade across a database migration unless the
+release notes explicitly document a safe downgrade path.
 
 ## Verify a NAS installation
 

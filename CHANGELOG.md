@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pushed into Gitea's reserved `refs/pull/*` namespace, preventing `hook declined` sync failures.
 - The GitHub default branch is applied to the destination after each successful Git mirror, so
   repositories whose default is not `main` or `master` open on the correct branch in Gitea.
+- GitHub repository descriptions are copied into Gitea and refreshed during synchronization while
+  retaining readable mirror provenance and the ownership marker that guards every push.
 
 ### Changed
 
@@ -24,6 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Docker Compose publishes the dashboard to the private network by default through configurable
   `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` settings. Deployments should restrict access with
   their host firewall because GitHarbor does not provide dashboard authentication.
+- The README and operations guide now provide a discoverable release-notification, version-check,
+  backup, image-pull, recreation, and post-upgrade verification process.
 
 ## [0.6.0] - 2026-09-04
 

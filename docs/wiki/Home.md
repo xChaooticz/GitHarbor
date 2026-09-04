@@ -17,7 +17,8 @@ automatically deletes a destination repository when the source disappears or a s
    the schedule, visibility, database path, timeouts, or LFS behavior.
 5. Read [Container packages](https://github.com/xChaooticz/GitHarbor/wiki/Container-Packages) before
    enabling registry mirroring and choosing its retention mode.
-6. Keep [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) and
+6. Keep [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) for update, backup,
+   and monitoring procedures, and
    [Troubleshooting](https://github.com/xChaooticz/GitHarbor/wiki/Troubleshooting) nearby after
    deployment.
 
@@ -29,6 +30,7 @@ automatically deletes a destination repository when the source disappears or a s
 - Native Gitea releases with tag, title, body, target, draft/prerelease state, and transferable assets
 - Multi-platform container images and tags linked to owned repositories when explicitly enabled
 - A stable mapping based on GitHub's numeric repository ID, even after a rename or transfer
+- GitHub repository descriptions, with mirror provenance and a guarded ownership marker
 - The last known Gitea copy when a repository becomes inaccessible or is unstarred
 
 GitHarbor does not migrate issues, pull requests, Actions, discussions, LFS locks, or LFS objects

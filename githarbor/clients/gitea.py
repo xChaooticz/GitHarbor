@@ -25,6 +25,9 @@ class GiteaAssetUploadError(GiteaError):
     pass
 
 
+_MAX_REPOSITORY_DESCRIPTION = 2048
+
+
 @dataclass(frozen=True, slots=True)
 class AttachmentSettings:
     enabled: bool
@@ -107,6 +110,21 @@ class DestinationRepository:
 
 def management_marker(github_id: int, kind: str) -> str:
     return f"GitHarbor managed; github-id:{github_id}; kind:{kind}"
+
+
+def managed_repository_description(
+    source_description: str | None,
+    source_full_name: str,
+    github_id: int,
+    kind: str,
+) -> str:
+    provenance = f"Mirrored from GitHub: {source_full_name}. {management_marker(github_id, kind)}"
+    source = (source_description or "").strip()
+    if not source:
+        return provenance
+    separator = "\n\n"
+    available = _MAX_REPOSITORY_DESCRIPTION - len(separator) - len(provenance)
+    return f"{source[:available].rstrip()}{separator}{provenance}"
 
 
 class GiteaClient:
@@ -326,9 +344,13 @@ class GiteaClient:
         kind: str,
         source_full_name: str,
         private: bool,
+        source_description: str | None = None,
         fallback_name: str | None = None,
     ) -> DestinationRepository:
         marker = management_marker(github_id, kind)
+        description = managed_repository_description(
+            source_description, source_full_name, github_id, kind
+        )
         existing = await self._optional_request("GET", f"repos/{namespace}/{name}")
         if existing is not None:
             try:
@@ -340,9 +362,10 @@ class GiteaClient:
                     namespace,
                     fallback_name,
                     marker,
-                    source_full_name,
+                    description,
                     private,
                 )
+            existing = await self._update_description(namespace, name, existing, description)
             return self._destination(existing, namespace, name)
 
         if fallback_name is not None and fallback_name != name:
@@ -352,39 +375,55 @@ class GiteaClient:
                 renamed = await self._request(
                     "PATCH",
                     f"repos/{namespace}/{fallback_name}",
-                    json={"name": name},
+                    json={"name": name, "description": description},
                 )
                 if not isinstance(renamed, dict):
                     raise GiteaError("Gitea returned an invalid repository rename response")
                 return self._destination(renamed, namespace, name)
 
-        return await self._create_repository(namespace, name, marker, source_full_name, private)
+        return await self._create_repository(namespace, name, description, private)
 
     async def _ensure_repository_at_name(
         self,
         namespace: str,
         name: str,
         marker: str,
-        source_full_name: str,
+        description: str,
         private: bool,
     ) -> DestinationRepository:
         existing = await self._optional_request("GET", f"repos/{namespace}/{name}")
         if existing is not None:
             self._verify_managed(existing, marker, namespace, name)
+            existing = await self._update_description(namespace, name, existing, description)
             return self._destination(existing, namespace, name)
-        return await self._create_repository(namespace, name, marker, source_full_name, private)
+        return await self._create_repository(namespace, name, description, private)
+
+    async def _update_description(
+        self,
+        namespace: str,
+        name: str,
+        payload: dict[str, Any],
+        description: str,
+    ) -> dict[str, Any]:
+        if payload.get("description") == description:
+            return payload
+        updated = await self._request(
+            "PATCH", f"repos/{namespace}/{name}", json={"description": description}
+        )
+        if not isinstance(updated, dict):
+            raise GiteaError("Gitea returned an invalid repository description response")
+        return updated
 
     async def _create_repository(
         self,
         namespace: str,
         name: str,
-        marker: str,
-        source_full_name: str,
+        description: str,
         private: bool,
     ) -> DestinationRepository:
         body = {
             "name": name,
-            "description": f"{marker}; source:{source_full_name}",
+            "description": description,
             "private": private,
             "auto_init": False,
         }
