@@ -316,8 +316,6 @@ class SyncService:
                     self.settings.github_token.get_secret_value(),
                     self.settings.gitea_token.get_secret_value(),
                 ]
-                if self.settings.github_packages_token is not None:
-                    secrets.append(self.settings.github_packages_token.get_secret_value())
                 message = redact(
                     str(exc),
                     secrets,

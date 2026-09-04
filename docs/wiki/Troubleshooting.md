@@ -43,13 +43,8 @@ Use the login that created the token. Do not use a display name, email address, 
 
 ## Private GitHub repositories are missing
 
-For a fine-grained token:
-
-- Select the missing repository, or choose **All repositories** for the token's resource owner.
-- Grant repository **Contents: Read-only**; Metadata read is included automatically.
-- Approve or authorize the token if an organization or enterprise policy requires it.
-
-For a classic token, private cloning needs the `repo` scope. See
+The classic GitHub PAT needs `repo`, access to the missing repository, and any authorization
+required by organization SSO or enterprise policy. See
 [Tokens and permissions](https://github.com/xChaooticz/GitHarbor/wiki/Tokens-and-Permissions).
 
 GitHarbor's owned set intentionally uses the `owner` affiliation. Repositories available only through
@@ -57,8 +52,8 @@ organization membership or collaborator access are not classified as personally 
 
 ## Starred repositories are missing
 
-Grant account **Starring: Read-only** to a fine-grained GitHub token. Make sure
-`GITHUB_USERNAME` is the account whose stars should be listed.
+Classic PATs have no separate Starring read scope. Make sure `GITHUB_USERNAME` is the account that
+created `GITHUB_TOKEN` and whose stars should be listed.
 
 If a previously known star disappears, GitHarbor marks it `unstarred` and preserves its Gitea copy.
 Starring it again reactivates the same record on the next successful discovery.
@@ -147,7 +142,7 @@ owned by `GITHUB_USERNAME`. Packages linked only to starred repositories are int
 Check all of the following:
 
 1. `PACKAGES_ENABLED=true` and the container was recreated after changing `.env`.
-2. `GITHUB_PACKAGES_TOKEN` is a classic PAT with `read:packages`, has any required SSO approval, and
+2. `GITHUB_TOKEN` is a classic PAT with `read:packages`, has any required SSO approval, and
    can download the package from `GITHUB_CONTAINER_REGISTRY`.
 3. The GitHub package page shows a repository connection to the owned source repository.
 4. The Gitea token has `write:package`, plus its existing repository and namespace permissions.

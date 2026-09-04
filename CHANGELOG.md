@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-04
+
+### Changed
+
+- Container-package discovery and GHCR pulls now use `GITHUB_TOKEN`, removing the separate
+  `GITHUB_PACKAGES_TOKEN` setting. Setup now uses one classic GitHub PAT with `repo` and
+  `read:packages` for repository, release, LFS, package, and private GHCR reads.
+
 ## [0.5.1] - 2026-08-21
 
 ### Added
@@ -140,7 +148,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.3.0...v0.4.0

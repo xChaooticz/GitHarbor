@@ -127,9 +127,9 @@ class GitHubPackagesClient:
         payload = response.json()
         login = payload.get("login") if isinstance(payload, dict) else None
         if not isinstance(login, str):
-            raise GitHubPackagesError("GitHub Packages token response omitted its login")
+            raise GitHubPackagesError("GitHub token response omitted its login")
         if login.casefold() != self.username.casefold():
-            raise GitHubPackagesError("GITHUB_PACKAGES_TOKEN belongs to a different GitHub account")
+            raise GitHubPackagesError("GITHUB_TOKEN belongs to a different GitHub account")
         self._username_verified = True
 
     async def _paginate(

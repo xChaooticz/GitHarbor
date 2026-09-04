@@ -65,18 +65,15 @@ def test_settings_reject_invalid_release_asset_mode(tmp_path: Path) -> None:
         Settings(**settings_values(tmp_path), release_asset_mode="newest-three")  # type: ignore[arg-type]
 
 
-def test_package_mirroring_requires_classic_package_token(tmp_path: Path) -> None:
-    with pytest.raises(ValidationError, match="GITHUB_PACKAGES_TOKEN"):
-        Settings(**settings_values(tmp_path), packages_enabled=True)  # type: ignore[arg-type]
-
+def test_package_mirroring_uses_required_github_token(tmp_path: Path) -> None:
     settings = Settings(
         **settings_values(tmp_path),
         packages_enabled=True,
-        github_packages_token="packages-secret",
         container_image_mode="LATEST",
     )  # type: ignore[arg-type]
     assert settings.container_image_mode is ContainerImageMode.LATEST
-    assert "packages-secret" not in repr(settings)
+    assert settings.github_token.get_secret_value() == "github-secret"
+    assert "github_packages_token" not in Settings.model_fields
 
 
 def test_package_mirroring_rejects_gitea_subpath(tmp_path: Path) -> None:
@@ -86,7 +83,6 @@ def test_package_mirroring_rejects_gitea_subpath(tmp_path: Path) -> None:
         Settings(
             **values,
             packages_enabled=True,
-            github_packages_token="packages-secret",
         )  # type: ignore[arg-type]
 
 

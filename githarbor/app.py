@@ -36,9 +36,10 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         configure_logging(settings.log_level)
         run_migrations(settings.database_url)
         database = Database(settings.database_url)
+        github_token = settings.github_token.get_secret_value()
         github = GitHubClient(
             settings.github_api_base,
-            settings.github_token.get_secret_value(),
+            github_token,
             settings.github_username,
             settings.api_timeout_seconds,
             settings.release_asset_timeout_seconds,
@@ -52,10 +53,9 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         github_packages: GitHubPackagesClient | None = None
         container_mirror: ContainerMirrorService | None = None
         if settings.packages_enabled:
-            assert settings.github_packages_token is not None
             github_packages = GitHubPackagesClient(
                 settings.github_api_base,
-                settings.github_packages_token.get_secret_value(),
+                github_token,
                 settings.github_username,
                 settings.api_timeout_seconds,
             )
@@ -67,7 +67,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
                 RegistryCredentials(
                     settings.github_container_registry,
                     settings.github_username,
-                    settings.github_packages_token.get_secret_value(),
+                    github_token,
                 ),
                 settings.gitea_registry,
                 settings.gitea_token.get_secret_value(),

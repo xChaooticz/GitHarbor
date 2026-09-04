@@ -8,14 +8,14 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.5.1` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.6.0` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 
 ## Required settings
 
 | Variable | Meaning | Example |
 |---|---|---|
-| `GITHUB_TOKEN` | GitHub token used for API discovery and HTTPS Git/LFS reads | `github_pat_...` |
+| `GITHUB_TOKEN` | Classic GitHub PAT used for API, Git/LFS, release, and package reads | token value |
 | `GITHUB_USERNAME` | GitHub login that created the token and owns the personal repository set | `octocat` |
 | `GITEA_URL` | Gitea root URL, without `/api/v1` | `https://git.example.com` |
 | `GITEA_TOKEN` | Gitea API and HTTPS Git/LFS token | token value |
@@ -41,7 +41,6 @@ before filling in token values.
 | `RELEASE_ASSET_MODE` | `all` | Keep assets for `all` releases or only the `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Timeout for each asset download or upload; minimum 30 |
 | `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned repositories |
-| `GITHUB_PACKAGES_TOKEN` | none | Classic GitHub PAT with `read:packages`; required when enabled |
 | `GITHUB_CONTAINER_REGISTRY` | `ghcr.io` | Source registry hostname, optionally with a port |
 | `CONTAINER_IMAGE_MODE` | `all` | Keep every image digest or only the literal `latest` digest |
 | `PACKAGE_MAX_BYTES` | `0` | Conservative estimated per-image byte limit; `0` disables it |
@@ -53,7 +52,7 @@ before filling in token values.
 ## Complete example
 
 ```dotenv
-GITHUB_TOKEN=replace-with-github-read-token
+GITHUB_TOKEN=replace-with-github-token
 GITHUB_USERNAME=your-github-login
 GITHUB_API_URL=https://api.github.com
 
@@ -73,7 +72,6 @@ RELEASE_ASSETS_ENABLED=true
 RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
 PACKAGES_ENABLED=false
-GITHUB_PACKAGES_TOKEN=replace-with-classic-github-packages-token
 GITHUB_CONTAINER_REGISTRY=ghcr.io
 CONTAINER_IMAGE_MODE=all
 PACKAGE_MAX_BYTES=0
@@ -82,6 +80,9 @@ GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
 LOG_LEVEL=INFO
 ```
+
+`GITHUB_PACKAGES_TOKEN` is no longer a setting. Upgrading installations should delete it from
+`.env` and use one classic `GITHUB_TOKEN` with `repo` and `read:packages`.
 
 ## Scheduling
 
@@ -111,8 +112,8 @@ see [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Org
 
 The primary Git mirror is always enabled. `WIKI_ENABLED`, `RELEASES_ENABLED`,
 `RELEASE_ASSETS_ENABLED`, and `PACKAGES_ENABLED` control optional layers independently. The first
-three default to `true`; package mirroring defaults to `false` because it needs another GitHub token
-and can consume substantial registry storage.
+three default to `true`; package mirroring defaults to `false` because it requires a classic
+`GITHUB_TOKEN` with `read:packages` and can consume substantial registry storage.
 
 - `WIKI_ENABLED=false` skips wiki detection and mirroring.
 - `RELEASES_ENABLED=false` skips release metadata and release assets.

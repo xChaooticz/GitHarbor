@@ -89,7 +89,7 @@ To build a release from source instead:
 
 ```sh
 git fetch --tags
-git checkout v0.5.1
+git checkout v0.6.0
 docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 
@@ -119,15 +119,22 @@ GitHarbor's CI performs the same Compose startup and health test on an isolated 
 1. Create a replacement with the permissions in
    [Tokens and permissions](https://github.com/xChaooticz/GitHarbor/wiki/Tokens-and-Permissions).
 2. Update only the relevant value in `.env`.
-3. Recreate and verify the container:
+3. When replacing `GITHUB_TOKEN` and Docker must pull a private GitHarbor package, refresh the
+   Docker host's saved registry login with the same new token:
+
+   ```sh
+   docker login ghcr.io -u YOUR_GITHUB_USERNAME
+   ```
+
+4. Recreate and verify the container:
 
    ```sh
    docker compose up -d --force-recreate githarbor
    docker compose logs --tail 100 githarbor
    ```
 
-4. Trigger a sync and confirm both provider connections.
-5. Revoke the old token.
+5. Trigger a sync and confirm both provider connections.
+6. Revoke the old token.
 
 ## Verify Git LFS preservation
 

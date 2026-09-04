@@ -10,7 +10,7 @@ automatically deletes a destination repository when the source disappears or a s
 1. Follow [Getting started](https://github.com/xChaooticz/GitHarbor/wiki/Getting-Started) from the
    prerequisites through the first successful synchronization.
 2. Use [Tokens and permissions](https://github.com/xChaooticz/GitHarbor/wiki/Tokens-and-Permissions)
-   to create least-privilege GitHub and Gitea credentials.
+   to create the required GitHub and Gitea credentials.
 3. Use [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Organizations) to
    prepare the two destination namespaces.
 4. Review [Configuration](https://github.com/xChaooticz/GitHarbor/wiki/Configuration) before changing

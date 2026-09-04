@@ -55,7 +55,8 @@ See [Architecture decisions](docs/architecture.md) for identity, naming, safety,
 ## Quick start with Docker Compose
 
 New to GitHarbor? The complete [Getting started guide](docs/wiki/Getting-Started.md) explains Docker
-networking, both provider tokens, Gitea organizations, Git LFS, first-run verification, and security.
+networking, the GitHub and Gitea tokens, Gitea organizations, Git LFS, first-run verification, and
+security.
 
 ```sh
 cp .env.example .env
@@ -71,8 +72,16 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.5.1` in `.env` to pin a specific published release. Private GHCR
-packages require `docker login ghcr.io` before Compose can pull them.
+Set `GITHARBOR_IMAGE_TAG=v0.6.0` in `.env` to pin a specific published release. If the GitHarbor
+package itself is private, log the Docker host in before Compose tries to pull it:
+
+```sh
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+```
+
+Paste the same classic PAT configured as `GITHUB_TOKEN` when Docker prompts for a password. The
+token needs `read:packages` and access to the package. Repository and package visibility are
+separate GitHub settings, so a private repository does not by itself prove that login is required.
 
 Open <http://127.0.0.1:9005>. Compose maps host port `9005` to the container's internal port `8000`
 and binds only to loopback by default. Put GitHarbor behind an
@@ -86,21 +95,15 @@ Back up both the Gitea installation and this volume.
 
 ### GitHub
 
-`GITHUB_TOKEN` is read-only from GitHarbor's perspective and `GITHUB_USERNAME` must equal its
-authenticated account. GitHarbor never writes to GitHub.
-
-- Fine-grained PAT: select every repository that should be backed up; grant **Metadata: read**,
-  **Contents: read**, and account **Starring: read**. New private repositories must also be added to
-  the token's repository selection (or select all repositories).
-- Classic PAT: `repo` is needed to clone private repositories. Public-only operation can use the
-  smaller public read access supported by GitHub. GitHarbor does not require the `read:user` scope.
-
-Container packages require a separate classic PAT in `GITHUB_PACKAGES_TOKEN` with
-`read:packages`. GitHub's container registry does not accept a fine-grained PAT for this registry
-login. Leave `PACKAGES_ENABLED=false` if package preservation is not needed.
+`GITHUB_TOKEN` is one classic GitHub PAT used for API discovery, Git/LFS, releases, assets, optional
+container packages, and private GHCR login. Grant the standard `repo` and `read:packages` scopes.
+They cover private repository data, container images, repository metadata, and the authenticated
+account's stars; classic PATs do not expose separate Metadata, Contents, or Starring read switches.
+`GITHUB_USERNAME` must equal the token's account. GitHarbor never writes to GitHub and does not need
+`read:user`, `write:packages`, or `delete:packages`.
 
 See [Tokens and permissions](docs/wiki/Tokens-and-Permissions.md) for click-by-click creation steps,
-least-privilege selections, enterprise notes, and rotation instructions.
+required scopes, enterprise notes, and rotation instructions.
 
 Organization SSO restrictions still apply. A GitHub `404` can mean deletion, lost access, or an SSO
 authorization problem; GitHarbor therefore treats absence as state, never as permission to delete.
@@ -117,15 +120,16 @@ an organization accessible to the token or the authenticated user's own namespac
 [Gitea organizations guide](docs/wiki/Gitea-Organizations.md) covers the recommended two-organization
 layout.
 
-Tokens stay in environment memory. They are not persisted to SQLite, HTML, API output, Git config,
-or command arguments. Git authentication uses a temporary askpass helper whose token comes from a
-child-process environment.
+Within GitHarbor, tokens stay in environment memory. They are not persisted to SQLite, HTML, API
+output, Git config, or command arguments. Git authentication uses a temporary askpass helper whose
+token comes from a child-process environment. A separate `docker login` stores the same GitHub PAT
+in the Docker host's configured credential store when a private deployment image must be pulled.
 
 ## Configuration
 
 | Variable | Required/default | Meaning |
 |---|---:|---|
-| `GITHUB_TOKEN` | required | Read-capable GitHub token |
+| `GITHUB_TOKEN` | required | Classic GitHub PAT with `repo` and `read:packages` |
 | `GITHUB_USERNAME` | required | Login owning the token and owned repository set |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API base (also supports GHES) |
 | `GITEA_URL` | required | Gitea root URL, without `/api/v1` |
@@ -143,7 +147,6 @@ child-process environment.
 | `RELEASE_ASSET_MODE` | `all` | Asset retention: `all` releases or only `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Per release-asset download or upload timeout |
 | `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned repositories |
-| `GITHUB_PACKAGES_TOKEN` | required when enabled | Classic GitHub PAT with `read:packages` |
 | `GITHUB_CONTAINER_REGISTRY` | `ghcr.io` | Source container registry host |
 | `CONTAINER_IMAGE_MODE` | `all` | Container retention: every digest or the literal `latest` digest |
 | `PACKAGE_MAX_BYTES` | `0` | Conservative per-image size ceiling; `0` disables it |
@@ -319,17 +322,17 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
   prove it manages that repository. Move/rename the unrelated repository; do not forge markers.
 - **Repository remains unavailable/unstarred:** this is expected preservation behavior. Restore
   GitHub access or star status; the next discovery uses the stable ID and resumes.
-- **Private clone fails after API discovery:** ensure the GitHub token has Contents read access to
-  that repository and any required organization SSO authorization.
+- **Private clone fails after API discovery:** ensure the classic GitHub PAT has `repo`, can access
+  that repository, and has any required organization SSO authorization.
 - **SQLite cannot open:** ensure the container's UID 10001 can write the mounted `/data` directory.
 - **Large repository timeout:** raise `GIT_TIMEOUT_SECONDS`; temporary space must fit one bare clone.
 - **LFS upload fails:** verify Gitea has `LFS_START_SERVER = true`, the token can write the repository,
   and its LFS storage has enough free space. Git refs are intentionally withheld on LFS failure.
 - **Release asset is skipped:** inspect **Last warning** on the repository page. Compare the asset
   size with Gitea's attachment limit and any reverse-proxy body-size limit, then retry the sync.
-- **Container image is skipped:** inspect **Last warning**, verify both package token scopes and
-  registry reachability, then compare Gitea's package and reverse-proxy limits with
-  `PACKAGE_MAX_BYTES`.
+- **Container image is skipped:** inspect **Last warning**, verify the GitHub token has
+  `read:packages`, verify registry reachability, then compare Gitea's package and reverse-proxy
+  limits with `PACKAGE_MAX_BYTES`.
 
 ## Current limitations
 

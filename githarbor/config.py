@@ -55,7 +55,6 @@ class Settings(BaseSettings):
     release_assets_enabled: bool = True
     release_asset_mode: ReleaseAssetMode = ReleaseAssetMode.ALL
     packages_enabled: bool = False
-    github_packages_token: SecretStr | None = None
     github_container_registry: str = "ghcr.io"
     container_image_mode: ContainerImageMode = ContainerImageMode.ALL
     package_max_bytes: int = Field(default=0, ge=0)
@@ -109,8 +108,6 @@ class Settings(BaseSettings):
     def validate_package_settings(self) -> Settings:
         if not self.packages_enabled:
             return self
-        if self.github_packages_token is None:
-            raise ValueError("GITHUB_PACKAGES_TOKEN is required when PACKAGES_ENABLED=true")
         parsed = urlsplit(str(self.gitea_url))
         if parsed.path.rstrip("/") or parsed.query or parsed.fragment:
             raise ValueError("GITEA_URL must be an instance root when package mirroring is enabled")

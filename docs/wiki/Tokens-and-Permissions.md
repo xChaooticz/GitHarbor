@@ -1,85 +1,71 @@
 # Tokens and permissions
 
-GitHarbor uses two different credentials. The GitHub token is read-only. The Gitea token must create
-and update destination repositories, so it intentionally has write access within the destination
-account.
+GitHarbor uses one token per provider. `GITHUB_TOKEN` is the only GitHub credential and remains
+read-only from GitHarbor's perspective. The Gitea token must create and update destinations, so it
+intentionally has write access within the destination account.
 
 Treat both tokens as passwords. Never paste them into an issue, commit, screenshot, container image,
 or shell command that will remain in history.
 
-## GitHub token
+## GitHub classic PAT
 
-A fine-grained personal access token is recommended for GitHub.com. GitHub documents the creation
-flow in [Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+GitHarbor uses one classic PAT for every GitHub operation. Configure it as `GITHUB_TOKEN`; there is
+no separate repository, star, release, LFS, or container-package token.
 
-### Fine-grained token: recommended
+Create it once:
 
 1. In GitHub, open your profile menu and choose **Settings**.
-2. Open **Developer settings** → **Personal access tokens** → **Fine-grained tokens**.
-3. Choose **Generate new token**.
-4. Use a descriptive name such as `GitHarbor read-only backup` and choose an expiration date.
-5. Set **Resource owner** to the personal account used by `GITHUB_USERNAME`.
-6. Under **Repository access**, choose:
-   - **All repositories** if future private repositories should be discovered automatically, or
-   - **Only select repositories** for a smaller boundary that you will maintain manually.
-7. Under **Repository permissions**, set **Contents** to **Read-only**. **Metadata: Read-only** is
-   automatically included by GitHub.
-8. Under **Account permissions**, set **Starring** to **Read-only**.
-9. Leave every other permission at **No access**, create the token, and copy it immediately.
+2. Open **Developer settings** → **Personal access tokens** → **Tokens (classic)**.
+3. Choose **Generate new token (classic)**, use a name such as `GitHarbor`, and set an expiration.
+4. Select `repo`.
+5. Select `read:packages`.
+6. Leave every other scope unselected.
+7. Authorize the token for organization SSO when a repository or package requires it.
+8. Create the token, copy it immediately, and put it in `.env` as `GITHUB_TOKEN`.
 
-Why these permissions are needed:
+The two scopes cover the complete setup:
 
-| Permission | GitHarbor use |
+| Classic scope | GitHarbor use |
 |---|---|
-| Metadata: read | List owned repositories and read repository identity/clone metadata |
-| Contents: read | Clone private Git/LFS data and read releases and release assets |
-| Starring: read | List the authenticated account's starred repositories |
+| `repo` | Discover and clone private repositories; read metadata, Git/LFS, releases, and assets |
+| `read:packages` | Discover and pull container packages, including a private GHCR deployment image |
 
-GitHub's endpoint documentation confirms that listing authenticated repositories needs
-[Metadata read](https://docs.github.com/en/rest/repos/repos#list-repositories-for-the-authenticated-user)
-and listing stars needs
-[Starring read](https://docs.github.com/en/rest/activity/starring#list-repositories-starred-by-the-authenticated-user).
+Classic PATs do not provide separate Metadata read, Contents read, or Starring read switches.
+Authenticated star listing needs no additional classic scope, and `repo` makes private repository
+metadata and contents visible. GitHarbor does not need `read:user`, `write:packages`, or
+`delete:packages`.
 
-If you select individual repositories, GitHarbor cannot discover a new private repository until it
-is added to the token. A fine-grained token is also limited to one resource owner. GitHarbor's owned
-discovery currently targets personal repositories owned by `GITHUB_USERNAME`; it does not treat
-organization-membership or collaborator access as ownership.
+GitHarbor performs only reads on GitHub. However, the classic `repo` scope itself grants broader
+repository capability than GitHarbor uses, so protect and rotate the PAT according to its full
+scope. The token account must have access to every private repository and package being preserved.
+A GitHub `404` can mean missing access rather than deletion; GitHarbor preserves the destination in
+either case.
 
-### Classic token: compatibility option
-
-Use a classic PAT only when a fine-grained token cannot cover your account or enterprise setup:
-
-1. Open **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**.
-2. Choose **Generate new token (classic)** and set an expiration.
-3. Select `repo` if private repositories must be discovered and cloned.
-4. For public repositories only, no broad private-repository scope is needed.
-
-`read:user` is not required by GitHarbor: it reads only the authenticated account's public login for
-the username safety check. Organization SSO or enterprise policy may still require separately
-authorizing the token. A GitHub `404` can represent missing access, not only a missing repository;
-GitHarbor preserves the destination in either case.
+GitHub documents classic PAT creation in
+[Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+and the `read:packages` requirement in its
+[container-registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 ### GitHub Enterprise Server
 
 Set `GITHUB_API_URL` to the enterprise REST API root, commonly
 `https://github.example.com/api/v3`. Token types and available permissions vary by GHES version, so
 use that server's matching GitHub documentation. The token still needs API discovery plus HTTPS Git
-and LFS read access.
+and LFS read access, plus authenticated package reads when package mirroring is enabled.
 
-## GitHub Packages token
+## Docker login for a private deployment image
 
-Container package mirroring uses `GITHUB_PACKAGES_TOKEN`, separate from the repository discovery
-token. GitHub Container Registry authentication currently requires a personal access token
-(classic); a fine-grained PAT cannot be used for this registry login.
+Docker must authenticate before it can pull a private GitHarbor image, before the application can
+read `.env`. Log in once on the Docker host, as the same operating-system user that runs Compose:
 
-1. Open **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**.
-2. Choose **Generate new token (classic)** and set an expiration.
-3. Select only `read:packages`.
-4. Authorize the token for organization SSO when the linked package requires it.
-5. Put the value in `GITHUB_PACKAGES_TOKEN` and set `PACKAGES_ENABLED=true`.
+```sh
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+```
 
-The token account must be able to download each package. GitHarbor never publishes, changes, or
-deletes packages on GitHub. Keep package mirroring disabled if a classic token is not acceptable.
+Paste the same classic PAT stored as `GITHUB_TOKEN` when prompted for the password. The token needs
+`read:packages` and access to that deployment package. Docker stores the credential in its own
+credential store; do not put the token directly on the command line. Public packages need no login.
+GitHub repository visibility and container-package visibility can be configured independently.
 
 ## Gitea token
 

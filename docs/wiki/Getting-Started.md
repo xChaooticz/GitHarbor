@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.5.1
+git checkout v0.6.0
 ```
 
 ## 3. Prepare Gitea
@@ -66,12 +66,15 @@ Restart Gitea after changing its configuration.
 
 Create:
 
-- A read-only GitHub token for discovery, cloning, release assets, and LFS downloads
+- One classic GitHub PAT that GitHarbor uses only for discovery, cloning, releases, LFS, and
+  container-package reads
 - A Gitea token that can create repositories, push Git/LFS data, and write releases and attachments
-- Optionally, a separate classic GitHub PAT with `read:packages` for container images
 
-Do not select blanket access when granular permissions are available. The exact screens and minimal
-permissions are documented in
+Grant the classic PAT `repo` for private repository data and `read:packages` for container images.
+These two scopes provide one consistent setup whether optional package mirroring is enabled now or
+later. No additional GitHub scopes are needed.
+
+The exact screens and required permissions are documented in
 [Tokens and permissions](https://github.com/xChaooticz/GitHarbor/wiki/Tokens-and-Permissions).
 
 ## 5. Create `.env`
@@ -110,7 +113,6 @@ RELEASE_ASSETS_ENABLED=true
 RELEASE_ASSET_MODE=all
 RELEASE_ASSET_TIMEOUT_SECONDS=3600
 PACKAGES_ENABLED=false
-GITHUB_PACKAGES_TOKEN=replace-with-classic-github-packages-token
 GITHUB_CONTAINER_REGISTRY=ghcr.io
 CONTAINER_IMAGE_MODE=all
 PACKAGE_MAX_BYTES=0
@@ -144,8 +146,18 @@ source instead, add `--build`:
 docker compose up -d --build
 ```
 
-For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.5.1`.
-If the GHCR package is private, authenticate the Docker host with `docker login ghcr.io` first.
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.0`.
+If the GitHarbor GHCR package is private, authenticate the Docker host before running Compose:
+
+```sh
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+```
+
+Paste the same classic PAT stored as `GITHUB_TOKEN` at the password prompt. It needs
+`read:packages` and access to the package. Docker stores registry authentication separately because
+it must pull the image before GitHarbor can read `.env`. Run `docker login` and `docker compose` as
+the same operating-system user. A private repository and a private package are not necessarily the
+same thing; GitHub package visibility may be configured independently.
 
 Press `Ctrl+C` to stop following logs; the container continues running. With
 `SYNC_ON_STARTUP=true`, the first discovery starts after application startup. Large accounts and LFS

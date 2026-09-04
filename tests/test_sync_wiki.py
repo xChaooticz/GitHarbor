@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import SecretStr
 
 from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
@@ -356,12 +355,7 @@ async def test_package_mirroring_runs_only_for_owned_repositories(
         session.flush()
         repository_id = repository.id
 
-    settings = make_settings(tmp_path).model_copy(
-        update={
-            "packages_enabled": True,
-            "github_packages_token": SecretStr("packages-secret"),
-        }
-    )
+    settings = make_settings(tmp_path).model_copy(update={"packages_enabled": True})
     container_mirror = RecordingContainerMirror()
     service = SyncService(
         settings,

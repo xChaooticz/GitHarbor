@@ -72,6 +72,11 @@ digest preservation. A SQLite ownership journal is written before external mutat
 exact Gitea package-version IDs after verification. Existing unmanaged package names or tags stop
 the transfer; cleanup deletes only exact recorded versions and retains anything externally changed.
 
+The same classic `GITHUB_TOKEN` authenticates repository API/Git reads, package discovery, and
+Skopeo's source-registry reads. This keeps one GitHub identity and rotation path. The standard token
+has `repo` for private repository data and `read:packages` for container reads. The independent
+Gitea token remains necessary for destination writes.
+
 In `all` mode, a deterministic digest-derived tag keeps every copied manifest reachable after
 mutable source tags move. In `latest` mode, the literal `latest` digest and all of its companion tags
 are verified before older managed versions are considered stale. Missing or ambiguous `latest`, a

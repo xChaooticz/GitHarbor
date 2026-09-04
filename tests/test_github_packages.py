@@ -73,7 +73,7 @@ async def test_packages_are_filtered_to_owned_repository_and_versions_are_parsed
 
 
 @pytest.mark.asyncio
-async def test_package_token_must_belong_to_configured_user() -> None:
+async def test_github_token_must_belong_to_configured_user() -> None:
     client = GitHubPackagesClient("https://api.github.test", "secret", "octocat")
     await client._client.aclose()
     client._client = httpx.AsyncClient(

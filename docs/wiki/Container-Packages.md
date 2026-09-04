@@ -2,7 +2,7 @@
 
 GitHarbor can mirror multi-platform OCI container images from GitHub Container Registry into
 Gitea's container registry. The feature is opt-in because container images can be large and GitHub
-requires a separate classic package token.
+Container Registry requires a classic PAT for authenticated pulls.
 
 ## Current scope
 
@@ -24,12 +24,12 @@ package view.
 
 ## Enable the feature
 
-Create a classic GitHub PAT with `read:packages`. Add `write:package` to the dedicated Gitea token,
-then configure:
+The standard classic PAT in `GITHUB_TOKEN`, with `repo` and `read:packages`, handles repository
+discovery, Git/LFS, releases, and source-container reads. Add `write:package` to the dedicated Gitea
+token, then configure:
 
 ```dotenv
 PACKAGES_ENABLED=true
-GITHUB_PACKAGES_TOKEN=github_pat_classic_value
 GITHUB_CONTAINER_REGISTRY=ghcr.io
 CONTAINER_IMAGE_MODE=all
 PACKAGE_MAX_BYTES=0
@@ -94,12 +94,28 @@ GitHarbor skips that image, writes the reason to **Last warning**, marks the rep
 
 ## Verify a mirror
 
-After a successful sync, inspect the source and destination:
+After a successful sync, authenticate to either private registry before inspecting it. For GHCR,
+use the same classic PAT stored as `GITHUB_TOKEN`:
+
+```sh
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+```
+
+For a private Gitea registry, log in with the Gitea account and paste its token at the password
+prompt:
+
+```sh
+docker login GITEA_HOST -u YOUR_GITEA_USERNAME
+```
+
+Then inspect or pull the images:
 
 ```sh
 docker buildx imagetools inspect ghcr.io/GITHUB_USER/PACKAGE:latest
 docker buildx imagetools inspect GITEA_HOST/GITEA_NAMESPACE/PACKAGE:latest
+docker pull GITEA_HOST/GITEA_NAMESPACE/PACKAGE:latest
 ```
 
-The top-level digest and platform manifests should match. Log in to a private Gitea registry before
-inspection. Never put tokens directly in a command line that will remain in shell history.
+The top-level digest and platform manifests should match. Run each `docker login` as the same
+operating-system user that runs the corresponding Docker command. Never put tokens directly in a
+command line that will remain in shell history.
