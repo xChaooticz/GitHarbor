@@ -12,7 +12,7 @@ services:
     environment:
       DATABASE_PATH: /data/githarbor.db
     ports:
-      - "127.0.0.1:9005:8000"
+      - "${GITHARBOR_BIND_ADDRESS:-0.0.0.0}:${GITHARBOR_PORT:-9005}:8000"
     volumes:
       - githarbor-data:/data
     security_opt:

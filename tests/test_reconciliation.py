@@ -80,3 +80,26 @@ def test_rename_and_transfer_follow_stable_id(upstream: UpstreamRepository, now:
         assert repository is not None
         assert repository.upstream_full_name == "new-owner/new-name"
         assert repository.destination_name == original_destination
+
+
+def test_starred_name_uses_id_suffix_only_for_a_collision(
+    upstream: UpstreamRepository, now: datetime
+) -> None:
+    database = memory_database()
+    reconciler = Reconciler()
+    colliding = replace(
+        upstream,
+        github_id=456,
+        node_id="R_456",
+        owner="octo user",
+        full_name="octo user/project",
+        html_url="https://github.example/octo user/project",
+        clone_url="https://github.example/octo user/project.git",
+    )
+    with database.session_factory() as session:
+        reconciler.reconcile(session, [upstream, colliding], RepositoryKind.STARRED, "archive", now)
+        repositories = session.scalars(select(Repository).order_by(Repository.github_id)).all()
+        assert [item.destination_name for item in repositories] == [
+            "octo-user--project",
+            "octo-user--project--gh456",
+        ]

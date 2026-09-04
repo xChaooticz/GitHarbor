@@ -71,11 +71,12 @@ do not copy or forge GitHarbor's marker.
 ## Repository names
 
 - Owned `github-user/my-project` becomes `github-backups/my-project`.
-- Starred `some-owner/tool` becomes a name such as
-  `github-archive/some-owner--tool--gh123456`.
+- Starred `some-owner/tool` normally becomes `github-archive/some-owner--tool`.
 
-The numeric suffix is the stable GitHub repository ID. It avoids collisions and lets GitHarbor keep
-the same Gitea destination after an upstream rename or transfer.
+GitHarbor adds the stable-ID suffix `--gh123456` only when normalized names or an existing Gitea
+path collide. On upgrade, an old always-suffixed repository is renamed automatically when its
+management marker matches and the clean path is free. Collision names and destinations whose source
+was renamed or transferred remain unchanged.
 
 ## LFS prerequisite
 

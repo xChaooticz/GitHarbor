@@ -21,6 +21,7 @@ from githarbor.models import (
 )
 from githarbor.services.containers import ContainerMirrorService
 from githarbor.services.git import GitMirror
+from githarbor.services.naming import collision_destination_name, destination_name
 from githarbor.services.reconciliation import Reconciler
 from githarbor.services.redaction import redact
 from githarbor.services.releases import ReleaseMirrorService
@@ -222,14 +223,36 @@ class SyncService:
                             "Upstream path now refers to a different GitHub repository ID; "
                             "refusing sync"
                         )
+                requested_destination = destination
+                fallback_destination: str | None = None
+                if kind == RepositoryKind.STARRED.value:
+                    preferred = destination_name(
+                        upstream.owner, upstream.name, upstream.github_id, kind
+                    )
+                    collision_safe = collision_destination_name(
+                        upstream.owner, upstream.name, upstream.github_id, kind
+                    )
+                    if destination == preferred:
+                        fallback_destination = collision_safe
+                    elif destination == collision_safe:
+                        requested_destination = preferred
+                        fallback_destination = collision_safe
+
                 destination_repo = await self.gitea.ensure_repository(
                     namespace=namespace,
-                    name=destination,
+                    name=requested_destination,
                     github_id=github_id,
                     kind=kind,
                     source_full_name=upstream.full_name,
                     private=self.settings.destination_private,
+                    fallback_name=fallback_destination,
                 )
+                destination = destination_repo.name
+                with self.database.session_factory.begin() as session:
+                    repository = session.get(Repository, repository_id)
+                    assert repository is not None
+                    repository.destination_name = destination
+                    repository.destination_url = destination_repo.html_url
                 user = await self.gitea.authenticated_user()
                 self.gitea_status = "connected"
                 await self.git.mirror(
@@ -239,6 +262,10 @@ class SyncService:
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
                 )
+                if upstream.default_branch:
+                    await self.gitea.set_default_branch(
+                        namespace, destination, upstream.default_branch
+                    )
                 if self.settings.wiki_enabled and upstream.has_wiki:
                     has_wiki_content = await self.git.remote_has_refs(
                         upstream.wiki_clone_url,

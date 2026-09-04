@@ -114,6 +114,14 @@ git lfs pull
 git lfs fsck
 ```
 
+## Gitea rejects `refs/pull/*`
+
+GitHub exposes pull-request-only commits through a provider-owned `refs/pull/*` namespace, which
+Gitea reserves for its own pull requests. GitHarbor v0.6.1 and newer remap these refs to
+`refs/githarbor/github-pull/*` before pushing so the commits remain preserved. If logs contain
+`hook declined to update refs/pull/...`, upgrade the GitHarbor image and retry the repository. Do not
+disable Gitea's Git hooks.
+
 ## Release asset is skipped or the run is `partial`
 
 Open the repository detail page and read **Last warning**. GitHarbor keeps the repository `active`

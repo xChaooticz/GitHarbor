@@ -43,6 +43,9 @@ class FakeGitea:
     async def authenticated_user(self) -> dict[str, str]:
         return {"login": "gitea-user"}
 
+    async def set_default_branch(self, _namespace: str, _name: str, _branch: str) -> None:
+        return None
+
     async def list_releases(self, _namespace: str, _name: str) -> list[Any]:
         return []
 

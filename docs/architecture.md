@@ -12,9 +12,11 @@ method in the Gitea client.
 
 The database identity is GitHub's numeric repository ID plus the owned/starred kind. Full names are
 metadata, so a rename or transfer updates upstream fields without creating a new destination. Owned
-destinations retain the familiar repository name. Starred destinations use
-`owner--name--gh<github_id>`, which is recognizable and collision-proof. Destination assignments are
-immutable after first discovery.
+destinations retain the familiar repository name. Starred destinations normally use `owner--name`;
+the `--gh<github_id>` suffix is reserved for an actual normalized-name or Gitea-path collision.
+Legacy always-suffixed destinations are renamed through Gitea's API only when the old management
+marker matches and the clean path is available. Other assignments remain stable across upstream
+renames and transfers.
 
 ## Push ownership proof
 
@@ -28,8 +30,11 @@ collision.
 Each operation gets a unique temporary directory and performs a fresh bare clone. This spends more
 bandwidth than a persistent cache, but avoids stale/corrupt cache recovery and leaves no long-lived
 upstream copy or credential configuration. `--mirror` accurately synchronizes refs, including forced
-updates and deletion. Tokens are supplied through a short-lived askpass environment and redacted
-from errors.
+updates and deletion. GitHub's provider-owned `refs/pull/*` namespace is transactionally moved to
+`refs/githarbor/github-pull/*` in the temporary clone before the push because Gitea reserves its own
+pull-ref namespace. PR-only commits remain reachable without colliding with Gitea hooks. After the
+push, the Gitea API applies GitHub's current default branch. Tokens are supplied through a
+short-lived askpass environment and redacted from errors.
 
 Git LFS is transferred before refs are published: the mirror fetches all LFS objects reachable from
 its complete ref namespace, uploads them to a named destination remote, then performs the mirror

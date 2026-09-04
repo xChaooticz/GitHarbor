@@ -17,6 +17,8 @@ class GitError(RuntimeError):
 
 class GitMirror:
     destination_remote = "githarbor-destination"
+    github_pull_prefix = "refs/pull/"
+    preserved_pull_prefix = "refs/githarbor/github-pull/"
 
     def __init__(self, timeout_seconds: int = 3600, lfs_enabled: bool = True) -> None:
         self.timeout_seconds = timeout_seconds
@@ -114,6 +116,12 @@ class GitMirror:
                     self._environment(askpass, destination_username, destination_token),
                     [destination_token],
                 )
+            await self._remap_github_pull_refs(
+                mirror_path,
+                root,
+                self._environment(askpass, "x-access-token", source_token),
+                [source_token],
+            )
             await self._run(
                 self.push_command(mirror_path, destination_url),
                 root,
@@ -137,6 +145,66 @@ class GitMirror:
             "--",
             destination_url,
         ]
+
+    @staticmethod
+    def list_special_refs_command(mirror_path: Path) -> list[str]:
+        return [
+            "git",
+            "-C",
+            str(mirror_path),
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/pull/",
+            "refs/githarbor/github-pull/",
+        ]
+
+    @staticmethod
+    def update_refs_command(mirror_path: Path) -> list[str]:
+        return ["git", "-C", str(mirror_path), "update-ref", "--stdin"]
+
+    async def _remap_github_pull_refs(
+        self,
+        mirror_path: Path,
+        cwd: Path,
+        env: Mapping[str, str],
+        secrets: list[str],
+    ) -> None:
+        returncode, stdout, stderr = await self._execute(
+            self.list_special_refs_command(mirror_path), cwd, env
+        )
+        if returncode:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise GitError(redact(detail or "Unable to inspect Git refs", secrets)[:4000])
+
+        refs: dict[str, str] = {}
+        for line in stdout.decode("utf-8", errors="strict").splitlines():
+            ref, object_id = line.split(" ", 1)
+            refs[ref] = object_id
+
+        transaction = ["start"]
+        for ref, object_id in refs.items():
+            if not ref.startswith(self.github_pull_prefix):
+                continue
+            suffix = ref.removeprefix(self.github_pull_prefix)
+            preserved_ref = f"{self.preserved_pull_prefix}{suffix}"
+            preserved_object_id = refs.get(preserved_ref)
+            if preserved_object_id is not None and preserved_object_id != object_id:
+                raise GitError(
+                    f"Source ref {ref} collides with reserved preservation ref {preserved_ref}"
+                )
+            if preserved_object_id is None:
+                transaction.append(f"create {preserved_ref} {object_id}")
+            transaction.append(f"delete {ref} {object_id}")
+        if len(transaction) == 1:
+            return
+        transaction.extend(("prepare", "commit", ""))
+        await self._run(
+            self.update_refs_command(mirror_path),
+            cwd,
+            env,
+            secrets,
+            "\n".join(transaction).encode("utf-8"),
+        )
 
     @classmethod
     def add_remote_command(cls, mirror_path: Path, destination_url: str) -> list[str]:
@@ -233,8 +301,9 @@ class GitMirror:
         cwd: Path,
         env: Mapping[str, str],
         secrets: list[str],
+        input_data: bytes | None = None,
     ) -> None:
-        returncode, stdout, stderr = await self._execute(command, cwd, env)
+        returncode, stdout, stderr = await self._execute(command, cwd, env, input_data)
         if returncode:
             detail = stderr.decode("utf-8", errors="replace").strip()
             if not detail:
@@ -246,6 +315,7 @@ class GitMirror:
         command: Sequence[str],
         cwd: Path,
         env: Mapping[str, str],
+        input_data: bytes | None = None,
     ) -> tuple[int, bytes, bytes]:
         process: asyncio.subprocess.Process | None = None
         try:
@@ -253,12 +323,16 @@ class GitMirror:
                 *command,
                 cwd=cwd,
                 env=env,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if input_data is not None
+                    else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=self.timeout_seconds
+                process.communicate(input_data), timeout=self.timeout_seconds
             )
         except TimeoutError as exc:
             if process is not None:

@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-04
+
+### Fixed
+
+- GitHub pull-request refs are preserved under `refs/githarbor/github-pull/*` instead of being
+  pushed into Gitea's reserved `refs/pull/*` namespace, preventing `hook declined` sync failures.
+- The GitHub default branch is applied to the destination after each successful Git mirror, so
+  repositories whose default is not `main` or `master` open on the correct branch in Gitea.
+
+### Changed
+
+- Starred repositories now use readable `owner--repository` destination names. The `--gh<ID>`
+  suffix is retained only for actual name collisions, and safely managed legacy destinations are
+  renamed automatically when the clean name is available.
+- Docker Compose publishes the dashboard to the private network by default through configurable
+  `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` settings. Deployments should restrict access with
+  their host firewall because GitHarbor does not provide dashboard authentication.
+
 ## [0.6.0] - 2026-09-04
 
 ### Changed
@@ -148,7 +166,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.4.0...v0.5.0

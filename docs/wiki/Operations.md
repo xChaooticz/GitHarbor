@@ -30,8 +30,9 @@ curl --fail -X POST http://127.0.0.1:9005/api/sync
 An accepted request returns HTTP `202`. A concurrent global or per-repository run returns `409`
 instead of starting duplicate work. A failed repository can also be retried from its detail page.
 
-These mutation endpoints have no built-in authentication. Keep the loopback port binding or
-put the service behind an authenticated proxy.
+These mutation endpoints have no built-in authentication. The default LAN binding is appropriate
+only for a trusted private network. Use `GITHARBOR_BIND_ADDRESS=127.0.0.1` and an authenticated proxy
+for access across untrusted networks.
 
 ## Backups
 
@@ -89,7 +90,7 @@ To build a release from source instead:
 
 ```sh
 git fetch --tags
-git checkout v0.6.0
+git checkout v0.6.1
 docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 

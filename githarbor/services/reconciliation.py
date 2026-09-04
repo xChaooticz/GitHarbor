@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from githarbor.clients.github import UpstreamRepository
 from githarbor.models import Repository, RepositoryKind, RepositoryStatus
-from githarbor.services.naming import destination_name
+from githarbor.services.naming import collision_destination_name, destination_name
 
 
 class Reconciler:
@@ -31,13 +31,24 @@ class Reconciler:
                 )
             )
             if local is None:
+                name = destination_name(
+                    upstream.owner, upstream.name, upstream.github_id, kind.value
+                )
+                collision = session.scalar(
+                    select(Repository).where(
+                        Repository.destination_namespace == namespace,
+                        Repository.destination_name == name,
+                    )
+                )
+                if collision is not None:
+                    name = collision_destination_name(
+                        upstream.owner, upstream.name, upstream.github_id, kind.value
+                    )
                 local = Repository(
                     github_id=upstream.github_id,
                     kind=kind.value,
                     destination_namespace=namespace,
-                    destination_name=destination_name(
-                        upstream.owner, upstream.name, upstream.github_id, kind.value
-                    ),
+                    destination_name=name,
                     first_discovered_at=seen_at,
                     last_seen_at=seen_at,
                     status=RepositoryStatus.ACTIVE.value,

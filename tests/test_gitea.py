@@ -47,6 +47,119 @@ async def test_enable_wiki_updates_repository_unit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_default_branch_updates_repository() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PATCH"
+        assert request.url.path == "/repos/archive/project"
+        assert request.content == b'{"default_branch":"develop"}'
+        return httpx.Response(200, json={"default_branch": "develop"})
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    await client.set_default_branch("archive", "project", "develop")
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_starred_repository_is_renamed_when_preferred_name_is_available() -> None:
+    requests: list[tuple[str, str, bytes]] = []
+    marker = management_marker(123, "starred")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path, request.content))
+        if request.url.path == "/repos/archive/octo-user--project":
+            return httpx.Response(404)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "description": marker,
+                    "clone_url": "https://gitea.test/archive/octo-user--project--gh123.git",
+                    "html_url": "https://gitea.test/archive/octo-user--project--gh123",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "description": marker,
+                "clone_url": "https://gitea.test/archive/octo-user--project.git",
+                "html_url": "https://gitea.test/archive/octo-user--project",
+            },
+        )
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    repository = await client.ensure_repository(
+        namespace="archive",
+        name="octo-user--project",
+        fallback_name="octo-user--project--gh123",
+        github_id=123,
+        kind="starred",
+        source_full_name="octo-user/project",
+        private=True,
+    )
+    await client.close()
+
+    assert repository.name == "octo-user--project"
+    assert requests == [
+        ("GET", "/repos/archive/octo-user--project", b""),
+        ("GET", "/repos/archive/octo-user--project--gh123", b""),
+        (
+            "PATCH",
+            "/repos/archive/octo-user--project--gh123",
+            b'{"name":"octo-user--project"}',
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unrelated_preferred_repository_keeps_managed_collision_name() -> None:
+    requests: list[tuple[str, str]] = []
+    marker = management_marker(123, "starred")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.url.path == "/repos/archive/octo-user--project":
+            return httpx.Response(200, json={"description": "Personal repository"})
+        return httpx.Response(
+            200,
+            json={
+                "description": marker,
+                "clone_url": "https://gitea.test/archive/octo-user--project--gh123.git",
+                "html_url": "https://gitea.test/archive/octo-user--project--gh123",
+            },
+        )
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    repository = await client.ensure_repository(
+        namespace="archive",
+        name="octo-user--project",
+        fallback_name="octo-user--project--gh123",
+        github_id=123,
+        kind="starred",
+        source_full_name="octo-user/project",
+        private=True,
+    )
+    await client.close()
+
+    assert repository.name == "octo-user--project--gh123"
+    assert requests == [
+        ("GET", "/repos/archive/octo-user--project"),
+        ("GET", "/repos/archive/octo-user--project--gh123"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_attachment_settings_convert_mebibytes() -> None:
     client = GiteaClient("https://gitea.test", "secret")
     await client._client.aclose()

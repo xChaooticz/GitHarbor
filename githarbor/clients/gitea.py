@@ -144,6 +144,15 @@ class GiteaClient:
                 "check whether the wiki repository unit is globally available"
             )
 
+    async def set_default_branch(self, namespace: str, name: str, branch: str) -> None:
+        payload = await self._request(
+            "PATCH", f"repos/{namespace}/{name}", json={"default_branch": branch}
+        )
+        if not isinstance(payload, dict) or payload.get("default_branch") != branch:
+            raise GiteaError(
+                f"Gitea did not set the default branch for {namespace}/{name} to {branch!r}"
+            )
+
     async def attachment_settings(self) -> AttachmentSettings | None:
         response = await self._raw_request("GET", "settings/attachment", allow_not_found=True)
         if response is None:
@@ -317,13 +326,62 @@ class GiteaClient:
         kind: str,
         source_full_name: str,
         private: bool,
+        fallback_name: str | None = None,
     ) -> DestinationRepository:
         marker = management_marker(github_id, kind)
         existing = await self._optional_request("GET", f"repos/{namespace}/{name}")
         if existing is not None:
-            self._verify_managed(existing, marker, namespace, name)
+            try:
+                self._verify_managed(existing, marker, namespace, name)
+            except DestinationSafetyError:
+                if fallback_name is None or fallback_name == name:
+                    raise
+                return await self._ensure_repository_at_name(
+                    namespace,
+                    fallback_name,
+                    marker,
+                    source_full_name,
+                    private,
+                )
             return self._destination(existing, namespace, name)
 
+        if fallback_name is not None and fallback_name != name:
+            fallback = await self._optional_request("GET", f"repos/{namespace}/{fallback_name}")
+            if fallback is not None:
+                self._verify_managed(fallback, marker, namespace, fallback_name)
+                renamed = await self._request(
+                    "PATCH",
+                    f"repos/{namespace}/{fallback_name}",
+                    json={"name": name},
+                )
+                if not isinstance(renamed, dict):
+                    raise GiteaError("Gitea returned an invalid repository rename response")
+                return self._destination(renamed, namespace, name)
+
+        return await self._create_repository(namespace, name, marker, source_full_name, private)
+
+    async def _ensure_repository_at_name(
+        self,
+        namespace: str,
+        name: str,
+        marker: str,
+        source_full_name: str,
+        private: bool,
+    ) -> DestinationRepository:
+        existing = await self._optional_request("GET", f"repos/{namespace}/{name}")
+        if existing is not None:
+            self._verify_managed(existing, marker, namespace, name)
+            return self._destination(existing, namespace, name)
+        return await self._create_repository(namespace, name, marker, source_full_name, private)
+
+    async def _create_repository(
+        self,
+        namespace: str,
+        name: str,
+        marker: str,
+        source_full_name: str,
+        private: bool,
+    ) -> DestinationRepository:
         body = {
             "name": name,
             "description": f"{marker}; source:{source_full_name}",

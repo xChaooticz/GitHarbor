@@ -8,8 +8,10 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.6.0` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.6.1` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
+`GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` are also Compose-only settings. They default to
+`0.0.0.0` and `9005`, making the dashboard reachable from the private LAN.
 
 ## Required settings
 
@@ -52,6 +54,10 @@ before filling in token values.
 ## Complete example
 
 ```dotenv
+GITHARBOR_IMAGE_TAG=latest
+GITHARBOR_BIND_ADDRESS=0.0.0.0
+GITHARBOR_PORT=9005
+
 GITHUB_TOKEN=replace-with-github-token
 GITHUB_USERNAME=your-github-login
 GITHUB_API_URL=https://api.github.com
@@ -178,6 +184,8 @@ replicas against the same SQLite file.
 
 ## Network exposure
 
-The supplied port mapping is `127.0.0.1:9005:8000`, so only the Docker host can reach the dashboard.
-Do not change it to a public bind unless an authenticated reverse proxy or equivalent access control
-protects the service. GitHarbor has no built-in login.
+The supplied port mapping defaults to `0.0.0.0:9005:8000`, so devices on the same private network can
+open `http://DOCKER_HOST_IP:9005`. Set `GITHARBOR_BIND_ADDRESS=127.0.0.1` for host-only access or when
+an authenticated reverse proxy is the sole entry point. `GITHARBOR_PORT` changes the host-side port.
+GitHarbor has no built-in login: anyone who can reach the port can view operational metadata and
+trigger synchronization. Never expose it directly to the internet or an untrusted network.

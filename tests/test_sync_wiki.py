@@ -29,13 +29,18 @@ class FakeGitHub:
 class RecordingGitea:
     def __init__(self) -> None:
         self.enabled_wikis: list[tuple[str, str]] = []
+        self.default_branches: list[tuple[str, str, str]] = []
+        self.ensure_calls: list[dict[str, Any]] = []
 
-    async def ensure_repository(self, **_kwargs: Any) -> DestinationRepository:
+    async def ensure_repository(self, **kwargs: Any) -> DestinationRepository:
+        self.ensure_calls.append(kwargs)
+        namespace = str(kwargs["namespace"])
+        name = str(kwargs["name"])
         return DestinationRepository(
-            "archive",
-            "project",
-            "https://gitea.test/archive/project.git",
-            "https://gitea.test/archive/project",
+            namespace,
+            name,
+            f"https://gitea.test/{namespace}/{name}.git",
+            f"https://gitea.test/{namespace}/{name}",
         )
 
     async def authenticated_user(self) -> dict[str, str]:
@@ -43,6 +48,9 @@ class RecordingGitea:
 
     async def enable_wiki(self, namespace: str, name: str) -> None:
         self.enabled_wikis.append((namespace, name))
+
+    async def set_default_branch(self, namespace: str, name: str, branch: str) -> None:
+        self.default_branches.append((namespace, name, branch))
 
     async def list_releases(self, _namespace: str, _name: str) -> list[Any]:
         return []
@@ -172,6 +180,7 @@ async def test_sync_mirrors_only_populated_wikis(
 
     assert await service.sync_repository(repository_id, "test") is True
     assert git.primary_mirrors == 1
+    assert gitea.default_branches == [("archive", "project", "main")]
     if wiki_has_refs:
         assert gitea.enabled_wikis == [("archive", "project")]
         assert git.wiki_mirrors[0]["source_url"].endswith("/project.wiki.git")
@@ -179,6 +188,51 @@ async def test_sync_mirrors_only_populated_wikis(
     else:
         assert gitea.enabled_wikis == []
         assert git.wiki_mirrors == []
+
+
+@pytest.mark.asyncio
+async def test_sync_migrates_legacy_starred_name_and_persists_destination(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    with database.session_factory.begin() as session:
+        repository = Repository(
+            github_id=upstream.github_id,
+            upstream_owner=upstream.owner,
+            upstream_name=upstream.name,
+            upstream_full_name=upstream.full_name,
+            upstream_url=upstream.html_url,
+            clone_url=upstream.clone_url,
+            kind="starred",
+            status=RepositoryStatus.ACTIVE.value,
+            destination_namespace="archive",
+            destination_name="octo-user--project--gh123",
+            currently_starred=True,
+            first_discovered_at=datetime.now(UTC),
+            last_seen_at=datetime.now(UTC),
+        )
+        session.add(repository)
+        session.flush()
+        repository_id = repository.id
+
+    gitea = RecordingGitea()
+    service = SyncService(
+        make_settings(tmp_path),
+        database,
+        FakeGitHub(upstream),  # type: ignore[arg-type]
+        gitea,  # type: ignore[arg-type]
+        RecordingGit(False),  # type: ignore[arg-type]
+    )
+
+    assert await service.sync_repository(repository_id, "test") is True
+    assert gitea.ensure_calls[0]["name"] == "octo-user--project"
+    assert gitea.ensure_calls[0]["fallback_name"] == "octo-user--project--gh123"
+    with database.session_factory() as session:
+        repository = session.get(Repository, repository_id)
+        assert repository is not None
+        assert repository.destination_name == "octo-user--project"
+        assert repository.destination_url == "https://gitea.test/archive/octo-user--project"
 
 
 @pytest.mark.asyncio

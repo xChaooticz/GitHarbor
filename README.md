@@ -72,7 +72,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.6.0` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.6.1` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -83,10 +83,11 @@ Paste the same classic PAT configured as `GITHUB_TOKEN` when Docker prompts for 
 token needs `read:packages` and access to the package. Repository and package visibility are
 separate GitHub settings, so a private repository does not by itself prove that login is required.
 
-Open <http://127.0.0.1:9005>. Compose maps host port `9005` to the container's internal port `8000`
-and binds only to loopback by default. Put GitHarbor behind an
-authenticated HTTPS reverse proxy before exposing it to a LAN or the internet; GitHarbor has no
-built-in user authentication.
+Open `http://DOCKER_HOST_IP:9005` from any device on the same private network. Compose maps host
+port `9005` to the container's internal port `8000` and listens on all host interfaces by default.
+Set `GITHARBOR_BIND_ADDRESS=127.0.0.1` when only the Docker host or a local reverse proxy should
+reach it. GitHarbor has no built-in user authentication, so never expose this port directly to an
+untrusted network or the internet.
 
 The named volume `githarbor-data` contains SQLite state. Gitea itself stores the preserved Git data.
 Back up both the Gitea installation and this volume.
@@ -129,6 +130,9 @@ in the Docker host's configured credential store when a private deployment image
 
 | Variable | Required/default | Meaning |
 |---|---:|---|
+| `GITHARBOR_IMAGE_TAG` | `latest` | Published container tag selected by Compose |
+| `GITHARBOR_BIND_ADDRESS` | `0.0.0.0` | Dashboard host address; use `127.0.0.1` for host-only access |
+| `GITHARBOR_PORT` | `9005` | Dashboard port published by Compose |
 | `GITHUB_TOKEN` | required | Classic GitHub PAT with `repo` and `read:packages` |
 | `GITHUB_USERNAME` | required | Login owning the token and owned repository set |
 | `GITHUB_API_URL` | `https://api.github.com` | GitHub API base (also supports GHES) |
@@ -162,9 +166,10 @@ made public/private or otherwise reconfigured automatically.
 
 Owned repository `github-user/my-project` becomes
 `GITEA_OWNED_NAMESPACE/my-project`. A starred repository becomes
-`GITEA_STARRED_NAMESPACE/github-owner--repository--gh123456`. The owner prevents human ambiguity;
-the stable GitHub numeric ID guarantees uniqueness after normalization. Once assigned, the
-destination name stays fixed across upstream renames and transfers.
+`GITEA_STARRED_NAMESPACE/github-owner--repository`. The owner prevents human ambiguity. GitHarbor
+adds the stable-ID suffix `--gh123456` only when normalization or an existing destination causes a
+real collision. Existing legacy names are shortened automatically when the clean destination is
+available; assignments remain fixed across later upstream renames and transfers.
 
 Every created Gitea description contains a management marker with the GitHub ID and repository kind.
 Before every push, an existing destination must have the exact expected marker. A missing or
@@ -181,6 +186,11 @@ only that record `error`; the rest of a global run continues.
 including force pushes and upstream ref deletions. Deleting an upstream branch or tag therefore also
 deletes that ref from the GitHarbor-managed destination; deleting the destination repository itself
 never happens automatically.
+
+GitHub's read-only `refs/pull/*` namespace conflicts with Gitea's own pull-request refs. GitHarbor
+preserves those commits under `refs/githarbor/github-pull/*` before pushing, avoiding Gitea hook
+rejections without discarding PR-only history. After each ref push, GitHarbor sets Gitea's default
+branch to the current GitHub default branch.
 
 With `GIT_LFS_ENABLED=true` (the default), GitHarbor runs authenticated `git lfs fetch --all` against
 the source and `git lfs push --all` against a named destination remote before it publishes Git refs.

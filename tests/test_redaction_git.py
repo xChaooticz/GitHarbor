@@ -124,7 +124,11 @@ async def test_lfs_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -
     async def record(command: Sequence[str], *_arguments: object) -> None:
         commands.append(command)
 
+    async def skip_ref_remap(*_arguments: object) -> None:
+        return None
+
     monkeypatch.setattr(mirror, "_run", record)
+    monkeypatch.setattr(mirror, "_remap_github_pull_refs", skip_ref_remap)
     await mirror.mirror(
         "https://github.test/a/b.git",
         "source-secret",

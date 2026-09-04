@@ -37,7 +37,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.6.0
+git checkout v0.6.1
 ```
 
 ## 3. Prepare Gitea
@@ -94,6 +94,10 @@ Copy-Item .env.example .env
 Open `.env` in a text editor and replace the placeholders. A typical configuration is:
 
 ```dotenv
+GITHARBOR_IMAGE_TAG=latest
+GITHARBOR_BIND_ADDRESS=0.0.0.0
+GITHARBOR_PORT=9005
+
 GITHUB_TOKEN=github_token_goes_here
 GITHUB_USERNAME=your-github-login
 
@@ -146,7 +150,7 @@ source instead, add `--build`:
 docker compose up -d --build
 ```
 
-For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.0`.
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.1`.
 If the GitHarbor GHCR package is private, authenticate the Docker host before running Compose:
 
 ```sh
@@ -165,8 +169,8 @@ repositories may take time because each repository is mirrored independently.
 
 ## 7. Verify the installation
 
-Open <http://127.0.0.1:9005> on the Docker host. You should see GitHub and Gitea connection status,
-repository counts, and synchronization results.
+Open `http://DOCKER_HOST_IP:9005` from the Docker host or another device on the same private network.
+You should see GitHub and Gitea connection status, repository counts, and synchronization results.
 
 You can also check the health endpoint:
 
@@ -178,7 +182,7 @@ Then verify in Gitea:
 
 1. Owned repositories appear in `github-backups` with their original repository name.
 2. Starred repositories appear in `github-archive` with collision-resistant names such as
-   `owner--repository--gh123456`.
+   `owner--repository`. A `--gh123456` suffix appears only when a real name collision requires it.
 3. A repository that uses LFS can be cloned from Gitea and checked with `git lfs pull` and
    `git lfs fsck`.
 4. A populated GitHub wiki appears under the managed repository's Gitea **Wiki** tab.
@@ -191,9 +195,10 @@ network issue. It is safe to retry; overlapping global runs are rejected.
 
 ## 8. Secure and operate it
 
-Compose binds the dashboard to `127.0.0.1:9005`. Keep that default unless you place GitHarbor behind
-an authenticated HTTPS reverse proxy or another trusted access layer. GitHarbor has no built-in
-authentication, so anyone who can reach the dashboard can trigger synchronization.
+Compose binds the dashboard to `0.0.0.0:9005`, making it available on the private LAN. GitHarbor has
+no built-in authentication, so anyone who can reach the dashboard can view its operational metadata
+and trigger synchronization. Do not forward this port from the router or expose it to an untrusted
+network. Set `GITHARBOR_BIND_ADDRESS=127.0.0.1` for host-only or reverse-proxy access.
 
 Next, read [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations) for upgrades,
 backups, token rotation, logs, and restore checks.
