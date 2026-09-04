@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-09-04
+
+### Fixed
+
+- Format the transient Git-push retry test so the release CI completes successfully.
+
 ## [0.6.3] - 2026-09-04
 
 ### Added
@@ -197,7 +203,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.0...v0.6.1

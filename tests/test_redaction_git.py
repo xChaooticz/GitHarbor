@@ -161,8 +161,6 @@ async def test_mirror_push_retries_a_transient_gateway_failure(
     monkeypatch.setattr(mirror, "_execute", execute)
     monkeypatch.setattr("githarbor.services.git.asyncio.sleep", sleep)
 
-    await mirror._run(
-        ["git", "push"], tmp_path, {}, [], retry_transient=True
-    )
+    await mirror._run(["git", "push"], tmp_path, {}, [], retry_transient=True)
 
     sleep.assert_awaited_once_with(1)

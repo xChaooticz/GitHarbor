@@ -8,7 +8,7 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.6.3` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.6.4` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` are also Compose-only settings. They default to
 `0.0.0.0` and `9005`, making the dashboard reachable from the private LAN.
