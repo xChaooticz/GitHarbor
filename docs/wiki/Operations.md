@@ -121,6 +121,13 @@ Compare the latest release with the installed version returned by the health end
 curl --fail http://127.0.0.1:9005/api/health
 ```
 
+For maintainers, publishing a GitHub release starts both the multi-architecture container build and
+an independent Wiki publication job. The job replaces the GitHub Wiki working tree with the
+released tag's `docs/wiki` contents, commits only when pages changed, and pushes that snapshot. This
+makes `docs/wiki` the version-controlled source of truth and prevents the Wiki from drifting behind
+a release. The workflow's manual-dispatch path performs the same operation for its selected source
+ref and version tag.
+
 Read the [changelog](https://github.com/xChaooticz/GitHarbor/blob/main/CHANGELOG.md), then back up
 GitHarbor's volume and Gitea. If the deployment was cloned from this repository, check out the new
 release so changes to `docker-compose.yml` and `.env.example` are included. The ignored `.env` file
@@ -128,7 +135,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.7.0
+git checkout v0.7.1
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave

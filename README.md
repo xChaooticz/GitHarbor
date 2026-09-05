@@ -80,7 +80,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.7.0` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.7.1` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -113,7 +113,7 @@ files first. The ignored `.env` file is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.7.0
+git checkout v0.7.1
 ```
 
 When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
@@ -420,15 +420,18 @@ docker build -t githarbor:local .
 docker compose config
 ```
 
-Tests use temporary SQLite databases and mocked clients. The suite also performs a real, token-free
-Git LFS transfer between temporary local bare repositories; `git-lfs` is therefore required for
-local testing and is installed in the Docker test stage.
+Most tests use temporary SQLite databases and mocked clients. The suite also performs a real,
+token-free Git LFS transfer between temporary local bare repositories; `git-lfs` is therefore
+required for local testing and is installed in the Docker test stage. A separately marked CI test
+provisions disposable Forgejo and Gitea services and verifies an idempotent external mirror of Git
+refs, a wiki, release metadata, and a release asset through the real provider APIs.
 
 GitHub Actions also starts the complete Compose service, checks the public health endpoint, and
 blocks merges or releases when Trivy finds a fixable high or critical vulnerability in the image.
 The container check runs weekly as well, so newly disclosed vulnerabilities are caught even when
-the source has not changed. Third-party actions are pinned to immutable commits and updated through
-Dependabot.
+the source has not changed. Publishing a release copies that tag's `docs/wiki` snapshot to the
+GitHub Wiki after the container workflow starts. Third-party actions are pinned to immutable commits,
+and both Python dependencies and actions are monitored by Dependabot.
 
 ## Troubleshooting
 

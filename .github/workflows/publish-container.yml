@@ -88,3 +88,44 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  publish-wiki:
+    name: Publish GitHub Wiki
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release documentation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.event.release.tag_name }}
+          path: source
+          persist-credentials: false
+
+      - name: Check out GitHub Wiki
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}.wiki
+          ref: master
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Synchronize release documentation
+        shell: bash
+        run: rsync --archive --delete --exclude=.git source/docs/wiki/ wiki/
+
+      - name: Publish changed Wiki pages
+        working-directory: wiki
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version_tag || github.event.release.tag_name }}
+        run: |
+          git add --all
+          if git diff --cached --quiet; then
+            echo "GitHub Wiki already matches $RELEASE_VERSION"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Publish documentation for $RELEASE_VERSION"
+          git push

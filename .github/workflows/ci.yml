@@ -27,6 +27,80 @@ jobs:
       - name: Run tests, lint, formatting, and type checks
         run: docker build --target test --tag githarbor:test .
 
+  external-integration:
+    name: Forgejo to Gitea integration
+    runs-on: ubuntu-latest
+    services:
+      forgejo:
+        image: codeberg.org/forgejo/forgejo:11.0.8
+        env:
+          FORGEJO__database__DB_TYPE: sqlite3
+          FORGEJO__security__INSTALL_LOCK: "true"
+          FORGEJO__service__DISABLE_REGISTRATION: "true"
+          FORGEJO__server__ROOT_URL: http://127.0.0.1:3301/
+        ports:
+          - 3301:3000
+      gitea:
+        image: gitea/gitea:1.23.8
+        env:
+          GITEA__database__DB_TYPE: sqlite3
+          GITEA__security__INSTALL_LOCK: "true"
+          GITEA__service__DISABLE_REGISTRATION: "true"
+          GITEA__server__ROOT_URL: http://127.0.0.1:3302/
+        ports:
+          - 3302:3000
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Wait for provider instances
+        shell: bash
+        run: |
+          for url in http://127.0.0.1:3301/api/healthz http://127.0.0.1:3302/api/healthz; do
+            for attempt in {1..60}; do
+              if curl --fail --silent --show-error "$url" >/dev/null; then
+                break
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "Timed out waiting for $url" >&2
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+
+      - name: Create integration users
+        shell: bash
+        run: |
+          docker exec --user git "${{ job.services.forgejo.id }}" forgejo admin user create \
+            --username forgejo-source \
+            --password forgejo-integration-password \
+            --email forgejo-source@githarbor.invalid \
+            --admin \
+            --must-change-password=false
+          docker exec --user git "${{ job.services.gitea.id }}" gitea admin user create \
+            --username gitea-destination \
+            --password gitea-integration-password \
+            --email gitea-destination@githarbor.invalid \
+            --admin \
+            --must-change-password=false
+
+      - name: Build integration-test image
+        run: docker build --target dev --tag githarbor:external-integration .
+
+      - name: Run real external-provider integration test
+        run: |
+          docker run --rm --network host \
+            -e GITHARBOR_EXTERNAL_INTEGRATION=1 \
+            -e INTEGRATION_FORGEJO_URL=http://127.0.0.1:3301 \
+            -e INTEGRATION_FORGEJO_USER=forgejo-source \
+            -e INTEGRATION_FORGEJO_PASSWORD=forgejo-integration-password \
+            -e INTEGRATION_GITEA_URL=http://127.0.0.1:3302 \
+            -e INTEGRATION_GITEA_USER=gitea-destination \
+            -e INTEGRATION_GITEA_PASSWORD=gitea-integration-password \
+            githarbor:external-integration \
+            pytest -q -m external_integration tests/test_external_provider_integration.py
+
   container:
     name: Container smoke test and security scan
     runs-on: ubuntu-latest

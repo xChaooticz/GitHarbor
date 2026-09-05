@@ -10,7 +10,9 @@ Thank you for helping improve GitHarbor. Please open an issue before a large beh
 4. Run `pytest`, `ruff check .`, `ruff format --check .`, and `mypy githarbor`.
 
 Keep preservation guarantees intact: discovery absence must never delete a Gitea repository. Tests
-must mock external services, avoid secrets, and cover new reconciliation behavior. Never include
-real API tokens or private repository data in issues, fixtures, logs, or commits.
+must normally mock external services, avoid secrets, and cover new reconciliation behavior. The
+`external_integration` test is the exception: CI runs it only against disposable local Forgejo and
+Gitea containers. Never point it at persistent instances or include real API tokens or private
+repository data in issues, fixtures, logs, or commits.
 
 By contributing, you agree that your contribution is licensed under the MIT License.

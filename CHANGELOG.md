@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-05
+
+### Added
+
+- CI now validates a complete external-source mirror against disposable Forgejo and Gitea
+  instances, including Git refs, wiki content, release metadata, assets, and repeat-run idempotence.
+
+### Changed
+
+- Release automation publishes the tagged `docs/wiki` snapshot to the GitHub Wiki and avoids empty
+  Wiki commits.
+- Dependabot version updates now cover Python dependencies in addition to pinned GitHub Actions.
+
+### Security
+
+- Dependabot vulnerability alerts and automatic security fixes are enabled for the GitHub
+  repository; `main` requires reviewed, up-to-date CI for non-admins, and `v*` release tags are
+  protected from non-admin updates and deletion.
+
 ## [0.7.0] - 2026-09-05
 
 ### Added
@@ -265,7 +284,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...v0.6.5
