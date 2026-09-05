@@ -8,7 +8,7 @@ import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from githarbor.clients.gitea import (
     AttachmentSettings,
@@ -19,10 +19,20 @@ from githarbor.clients.gitea import (
     GiteaError,
     GiteaRelease,
 )
-from githarbor.clients.github import GitHubClient, GitHubError, GitHubRelease, GitHubReleaseAsset
+from githarbor.clients.github import GitHubError, GitHubRelease, GitHubReleaseAsset
 from githarbor.config import ReleaseAssetMode
 
 _MARKER_PATTERN = re.compile(r"<!-- githarbor-release:([A-Za-z0-9_-]+) -->\s*$")
+
+
+class ReleaseSourceClient(Protocol):
+    async def list_releases(self, full_name: str) -> list[GitHubRelease]: ...
+
+    async def get_latest_release(self, full_name: str) -> GitHubRelease | None: ...
+
+    async def download_release_asset(
+        self, asset: GitHubReleaseAsset, destination: Path
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +121,7 @@ def decode_release_marker(body: str) -> ReleaseMarker | None:
 
 
 class ReleaseMirrorService:
-    def __init__(self, github: GitHubClient, gitea: GiteaClient) -> None:
+    def __init__(self, github: ReleaseSourceClient, gitea: GiteaClient) -> None:
         self.github = github
         self.gitea = gitea
 
@@ -136,12 +146,12 @@ class ReleaseMirrorService:
             if latest_release_id is not None and all(
                 release.github_id != latest_release_id for release in source_releases
             ):
-                raise GitHubError("GitHub's latest release was absent from its release listing")
+                raise GitHubError("The source's latest release was absent from its release listing")
             if latest_release_id is None and any(
                 not release.draft and not release.prerelease for release in source_releases
             ):
                 raise GitHubError(
-                    "GitHub's latest release endpoint omitted a listed stable release"
+                    "The source's latest release endpoint omitted a listed stable release"
                 )
 
         ordered_releases = source_releases
@@ -175,12 +185,14 @@ class ReleaseMirrorService:
                 )
             else:
                 destination, marker = managed_release
-                destination = await self.gitea.update_release(
-                    namespace,
-                    name,
-                    destination.gitea_id,
-                    self._release_payload(source, marker),
-                )
+                desired_payload = self._release_payload(source, marker)
+                if not self._release_matches(destination, desired_payload):
+                    destination = await self.gitea.update_release(
+                        namespace,
+                        name,
+                        destination.gitea_id,
+                        desired_payload,
+                    )
 
             if not mirror_assets:
                 continue
@@ -208,12 +220,14 @@ class ReleaseMirrorService:
             if source.github_id == latest_release_id:
                 latest_assets_ready = not asset_warnings
             final_marker = ReleaseMarker(source.github_id, updated_assets)
-            await self.gitea.update_release(
-                namespace,
-                name,
-                destination.gitea_id,
-                self._release_payload(source, final_marker),
-            )
+            final_payload = self._release_payload(source, final_marker)
+            if not self._release_matches(destination, final_payload):
+                await self.gitea.update_release(
+                    namespace,
+                    name,
+                    destination.gitea_id,
+                    final_payload,
+                )
 
         return warnings
 
@@ -230,6 +244,17 @@ class ReleaseMirrorService:
             payload["target_commitish"] = source.target_commitish
         return payload
 
+    @staticmethod
+    def _release_matches(destination: GiteaRelease, payload: dict[str, Any]) -> bool:
+        return (
+            destination.tag_name == payload["tag_name"]
+            and destination.name == payload["name"]
+            and destination.body == payload["body"]
+            and destination.target_commitish == payload.get("target_commitish", "")
+            and destination.draft is payload["draft"]
+            and destination.prerelease is payload["prerelease"]
+        )
+
     async def _mirror_assets(
         self,
         source: GitHubRelease,
@@ -239,8 +264,10 @@ class ReleaseMirrorService:
         namespace: str,
         name: str,
     ) -> tuple[dict[int, MirroredAsset], list[str]]:
-        destination_assets = await self.gitea.list_release_assets(
-            namespace, name, destination.gitea_id
+        destination_assets = (
+            list(destination.assets)
+            if destination.assets is not None
+            else await self.gitea.list_release_assets(namespace, name, destination.gitea_id)
         )
         by_id = {asset.gitea_id: asset for asset in destination_assets}
         by_name = {asset.name: asset for asset in destination_assets}
@@ -335,7 +362,7 @@ class ReleaseMirrorService:
                 return None
 
         if asset.state != "uploaded":
-            return f"{prefix}: GitHub reports state {asset.state!r}"
+            return f"{prefix}: source reports state {asset.state!r}"
         if settings is not None and not settings.enabled:
             return f"{prefix}: Gitea reports attachments are disabled"
         maximum = settings.max_size_bytes if settings is not None else None

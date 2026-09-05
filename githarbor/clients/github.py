@@ -90,6 +90,18 @@ class UpstreamRepository:
     has_wiki: bool
 
     @property
+    def source_provider(self) -> str:
+        return "github"
+
+    @property
+    def source_id(self) -> str:
+        return str(self.github_id)
+
+    @property
+    def source_username(self) -> str:
+        return "x-access-token"
+
+    @property
     def wiki_clone_url(self) -> str:
         parsed = urlsplit(self.clone_url)
         path = parsed.path.removesuffix(".git") + ".wiki.git"

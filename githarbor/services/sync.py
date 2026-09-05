@@ -7,10 +7,12 @@ from typing import Any
 
 from sqlalchemy import func, select, update
 
+from githarbor.clients.external_releases import ExternalReleaseClient
 from githarbor.clients.gitea import GiteaClient
 from githarbor.clients.github import GitHubClient, UpstreamRepository
 from githarbor.config import Settings
 from githarbor.database import Database
+from githarbor.external_sources import ExternalRepository, ExternalSources
 from githarbor.models import (
     Repository,
     RepositoryKind,
@@ -27,6 +29,8 @@ from githarbor.services.redaction import redact
 from githarbor.services.releases import ReleaseMirrorService
 
 logger = logging.getLogger(__name__)
+
+SourceRepository = UpstreamRepository | ExternalRepository
 
 
 class SyncService:
@@ -46,6 +50,7 @@ class SyncService:
         self.git = git
         self.container_mirror = container_mirror
         self.release_mirror = ReleaseMirrorService(github, gitea)
+        self.external_sources = ExternalSources(settings.external_sources_file)
         self.reconciler = Reconciler()
         self.global_lock = asyncio.Lock()
         self._repository_locks: dict[int, asyncio.Lock] = {}
@@ -151,7 +156,7 @@ class SyncService:
         async with self.global_lock:
             logger.info("Global synchronization started: trigger=%s", trigger)
             run_id = self._start_run(None, "global", trigger)
-            discovered_by_id: dict[tuple[int, str], UpstreamRepository] = {}
+            discovered_by_id: dict[tuple[int, str], SourceRepository] = {}
             discovery_errors: list[str] = []
             counts = {RepositoryKind.OWNED: 0, RepositoryKind.STARRED: 0}
             for kind, discover, namespace in (
@@ -179,7 +184,7 @@ class SyncService:
                     with self.database.session_factory() as session:
                         for local_id in ids:
                             local = session.get(Repository, local_id)
-                            if local is not None:
+                            if local is not None and local.github_id is not None:
                                 discovered_by_id[(local_id, kind.value)] = upstream_by_github_id[
                                     local.github_id
                                 ]
@@ -189,19 +194,75 @@ class SyncService:
                     discovery_errors.append(f"{kind.value}: {message}")
                     logger.error("%s repository discovery failed: %s", kind.value, message)
 
-            succeeded = 0
-            failed = 0
-            warnings = 0
-            logger.info("Global synchronization will mirror %d repositories", len(discovered_by_id))
-            for (repository_id, _kind), upstream in discovered_by_id.items():
-                if await self.sync_repository(repository_id, trigger="global", upstream=upstream):
-                    succeeded += 1
+            if self.external_sources.enabled:
+                try:
+                    logger.info("Loading external repositories")
+                    external_repositories = await self._load_external_repositories()
+                    seen_at = datetime.now(UTC)
                     with self.database.session_factory() as session:
-                        repository = session.get(Repository, repository_id)
-                        if repository is not None and repository.last_warning:
-                            warnings += 1
-                else:
-                    failed += 1
+                        ids = self.reconciler.reconcile_external(
+                            session, external_repositories, seen_at
+                        )
+                    upstream_by_identity = {
+                        (item.source_provider, item.source_id): item
+                        for item in external_repositories
+                    }
+                    with self.database.session_factory() as session:
+                        for local_id in ids:
+                            local = session.get(Repository, local_id)
+                            if local is not None:
+                                identity = (local.source_provider, local.source_id or "")
+                                discovered_by_id[(local_id, RepositoryKind.EXTERNAL.value)] = (
+                                    upstream_by_identity[identity]
+                                )
+                    logger.info("Loaded %d external repositories", len(external_repositories))
+                except Exception as exc:
+                    message = redact(str(exc))
+                    discovery_errors.append(f"external: {message}")
+                    logger.error("External repository discovery failed: %s", message)
+
+            logger.info("Global synchronization will mirror %d repositories", len(discovered_by_id))
+            semaphore = asyncio.Semaphore(self.settings.sync_concurrency)
+
+            async def sync_discovered(
+                repository_id: int, upstream: SourceRepository
+            ) -> tuple[bool, bool]:
+                async with semaphore:
+                    success = await self.sync_repository(
+                        repository_id, trigger="global", upstream=upstream
+                    )
+                if not success:
+                    return False, False
+                with self.database.session_factory() as session:
+                    repository = session.get(Repository, repository_id)
+                    return True, repository is not None and bool(repository.last_warning)
+
+            results = await asyncio.gather(
+                *(
+                    sync_discovered(repository_id, upstream)
+                    for (repository_id, _kind), upstream in discovered_by_id.items()
+                )
+            )
+            succeeded = sum(success for success, _warning in results)
+            failed = len(results) - succeeded
+            warnings = sum(warning for _success, warning in results)
+
+            if not discovery_errors:
+                active_cache_entries = {
+                    (self._cache_key(upstream, kind), directory_name)
+                    for (_repository_id, kind), upstream in discovered_by_id.items()
+                    for directory_name in (
+                        ("repository.git", "wiki.git")
+                        if self.settings.wiki_enabled and self._wiki_url(upstream) is not None
+                        else ("repository.git",)
+                    )
+                }
+                try:
+                    await self.git.maintain_cache(
+                        active_cache_entries, self.settings.git_cache_retention_days
+                    )
+                except Exception as exc:
+                    logger.warning("Git mirror cache maintenance failed: %s", redact(str(exc)))
 
             if discovery_errors and not discovered_by_id:
                 status = RunStatus.FAILED
@@ -235,7 +296,7 @@ class SyncService:
         self,
         repository_id: int,
         trigger: str = "manual",
-        upstream: UpstreamRepository | None = None,
+        upstream: SourceRepository | None = None,
     ) -> bool:
         lock = self._repository_locks.setdefault(repository_id, asyncio.Lock())
         if lock.locked():
@@ -253,6 +314,8 @@ class SyncService:
                 session.commit()
                 full_name = repository.upstream_full_name
                 github_id = repository.github_id
+                source_provider = repository.source_provider
+                source_id = repository.source_id or str(repository.github_id)
                 kind = repository.kind
                 namespace = repository.destination_namespace
                 destination = repository.destination_name
@@ -263,22 +326,47 @@ class SyncService:
                 full_name,
                 trigger,
             )
+            secrets = [
+                self.settings.github_token.get_secret_value(),
+                self.settings.gitea_token.get_secret_value(),
+            ]
             try:
                 if upstream is None:
-                    upstream = await self.github.get_repository(full_name)
-                    if upstream.github_id != github_id:
-                        raise RuntimeError(
-                            "Upstream path now refers to a different GitHub repository ID; "
-                            "refusing sync"
+                    if source_provider == "github":
+                        upstream = await self.github.get_repository(full_name)
+                        if upstream.github_id != github_id:
+                            raise RuntimeError(
+                                "Upstream path now refers to a different GitHub repository ID; "
+                                "refusing sync"
+                            )
+                    else:
+                        upstream = next(
+                            (
+                                item
+                                for item in await self._load_external_repositories()
+                                if item.source_provider == source_provider
+                                and item.source_id == source_id
+                            ),
+                            None,
                         )
+                        if upstream is None:
+                            raise RuntimeError(
+                                f"External source {source_provider}/{source_id} is no longer "
+                                "present in the sources file"
+                            )
+                if upstream.source_provider != source_provider or upstream.source_id != source_id:
+                    raise RuntimeError("Resolved source identity changed; refusing sync")
+                source_token = self._source_token(upstream)
+                secrets.append(source_token)
+                source_username = upstream.source_username
                 requested_destination = destination
                 fallback_destination: str | None = None
                 if kind == RepositoryKind.STARRED.value:
-                    preferred = destination_name(
-                        upstream.owner, upstream.name, upstream.github_id, kind
-                    )
+                    if github_id is None:
+                        raise RuntimeError("A starred GitHub repository is missing its stable ID")
+                    preferred = destination_name(upstream.owner, upstream.name, github_id, kind)
                     collision_safe = collision_destination_name(
-                        upstream.owner, upstream.name, upstream.github_id, kind
+                        upstream.owner, upstream.name, github_id, kind
                     )
                     if destination == preferred:
                         fallback_destination = collision_safe
@@ -301,6 +389,8 @@ class SyncService:
                     source_description=upstream.description,
                     private=self.settings.destination_private,
                     fallback_name=fallback_destination,
+                    source_provider=source_provider,
+                    source_id=source_id,
                 )
                 destination = destination_repo.name
                 logger.info(
@@ -316,19 +406,17 @@ class SyncService:
                     repository.destination_url = destination_repo.html_url
                 user = await self.gitea.authenticated_user()
                 self.gitea_status = "connected"
-                secrets = [
-                    self.settings.github_token.get_secret_value(),
-                    self.settings.gitea_token.get_secret_value(),
-                ]
                 logger.info(
                     "Mirroring Git refs: repository_id=%d upstream=%s", repository_id, full_name
                 )
                 await self.git.mirror(
                     source_url=upstream.clone_url,
-                    source_token=self.settings.github_token.get_secret_value(),
+                    source_token=source_token,
+                    source_username=source_username,
                     destination_url=destination_repo.clone_url,
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
+                    cache_key=self._cache_key(upstream, kind),
                 )
                 logger.info(
                     "Git refs mirrored: repository_id=%d upstream=%s", repository_id, full_name
@@ -342,14 +430,17 @@ class SyncService:
                         repository_id,
                         upstream.default_branch,
                     )
-                if self.settings.wiki_enabled and upstream.has_wiki:
+                wiki_url = self._wiki_url(upstream)
+                if self.settings.wiki_enabled and wiki_url is not None:
                     logger.info(
                         "Checking wiki: repository_id=%d upstream=%s", repository_id, full_name
                     )
-                    has_wiki_content = await self.git.remote_has_refs(
-                        upstream.wiki_clone_url,
-                        self.settings.github_token.get_secret_value(),
-                    )
+                    if source_username == "x-access-token":
+                        has_wiki_content = await self.git.remote_has_refs(wiki_url, source_token)
+                    else:
+                        has_wiki_content = await self.git.remote_has_refs(
+                            wiki_url, source_token, source_username
+                        )
                     if has_wiki_content:
                         logger.info(
                             "Mirroring wiki: repository_id=%d upstream=%s",
@@ -362,31 +453,55 @@ class SyncService:
                                 "Initialized destination wiki: repository_id=%d", repository_id
                             )
                         await self.git.mirror_wiki(
-                            source_url=upstream.wiki_clone_url,
-                            source_token=self.settings.github_token.get_secret_value(),
+                            source_url=wiki_url,
+                            source_token=source_token,
+                            source_username=source_username,
                             destination_url=destination_repo.wiki_clone_url,
                             destination_token=self.settings.gitea_token.get_secret_value(),
                             destination_username=str(user["login"]),
+                            cache_key=self._cache_key(upstream, kind),
                         )
-                        logger.info("Mirrored wiki for GitHub repository %s", upstream.full_name)
+                        logger.info(
+                            "Mirrored wiki for %s repository %s", source_provider, full_name
+                        )
                     else:
                         logger.info(
-                            "Skipped enabled but empty wiki for GitHub repository %s",
+                            "Skipped configured but empty wiki for %s repository %s",
+                            source_provider,
                             upstream.full_name,
                         )
                 release_warnings: list[str] = []
-                if self.settings.releases_enabled:
+                external_releases_enabled = (
+                    isinstance(upstream, ExternalRepository) and upstream.releases_enabled
+                )
+                if self.settings.releases_enabled and (
+                    source_provider == "github" or external_releases_enabled
+                ):
+                    external_release_client: ExternalReleaseClient | None = None
                     try:
                         logger.info(
                             "Mirroring releases: repository_id=%d upstream=%s",
                             repository_id,
                             full_name,
                         )
-                        release_warnings = await self.release_mirror.mirror(
+                        release_mirror = self.release_mirror
+                        mirror_assets = self.settings.release_assets_enabled
+                        if isinstance(upstream, ExternalRepository):
+                            external_release_client = ExternalReleaseClient(
+                                upstream,
+                                source_token,
+                                self.settings.api_timeout_seconds,
+                                self.settings.release_asset_timeout_seconds,
+                            )
+                            release_mirror = ReleaseMirrorService(
+                                external_release_client, self.gitea
+                            )
+                            mirror_assets = mirror_assets and upstream.release_assets_enabled
+                        release_warnings = await release_mirror.mirror(
                             upstream.full_name,
                             namespace,
                             destination,
-                            mirror_assets=self.settings.release_assets_enabled,
+                            mirror_assets=mirror_assets,
                             asset_mode=self.settings.release_asset_mode,
                         )
                         logger.info(
@@ -398,13 +513,18 @@ class SyncService:
                         message = redact(str(exc), secrets)[:1000]
                         release_warnings.append(f"release mirror failed: {message}")
                         logger.warning(
-                            "Release mirror for GitHub repository %s failed after the primary "
+                            "Release mirror for %s repository %s failed after the primary "
                             "repository was preserved: %s",
+                            source_provider,
                             upstream.full_name,
                             message,
                         )
+                    finally:
+                        if external_release_client is not None:
+                            await external_release_client.close()
                 package_warnings: list[str] = []
                 if self.settings.packages_enabled and kind == RepositoryKind.OWNED.value:
+                    assert github_id is not None
                     if self.container_mirror is None:
                         raise RuntimeError("Container package mirror was not initialized")
                     logger.info(
@@ -463,10 +583,6 @@ class SyncService:
                     )
                 return True
             except Exception as exc:
-                secrets = [
-                    self.settings.github_token.get_secret_value(),
-                    self.settings.gitea_token.get_secret_value(),
-                ]
                 message = redact(
                     str(exc),
                     secrets,
@@ -490,6 +606,48 @@ class SyncService:
         if len(message) <= 4000:
             return message
         return f"{message[:3950].rstrip()}; warning list truncated"
+
+    def _source_token(self, upstream: SourceRepository) -> str:
+        if isinstance(upstream, ExternalRepository):
+            return upstream.source_token()
+        return self.settings.github_token.get_secret_value()
+
+    async def _load_external_repositories(self) -> list[ExternalRepository]:
+        repositories: list[ExternalRepository] = []
+        identities: set[tuple[str, str]] = set()
+        for configured in self.external_sources.load():
+            token = configured.source_token()
+            client = ExternalReleaseClient(
+                configured,
+                token,
+                self.settings.api_timeout_seconds,
+                self.settings.release_asset_timeout_seconds,
+            )
+            try:
+                repository = await client.get_repository()
+            finally:
+                await client.close()
+            identity = (repository.source_provider, repository.source_id)
+            if identity in identities:
+                raise RuntimeError(
+                    "External provider returned a duplicate repository identity: "
+                    f"{repository.source_provider}/{repository.source_id}"
+                )
+            identities.add(identity)
+            repositories.append(repository)
+        return repositories
+
+    @staticmethod
+    def _wiki_url(upstream: SourceRepository) -> str | None:
+        if isinstance(upstream, UpstreamRepository) and not upstream.has_wiki:
+            return None
+        return upstream.wiki_clone_url
+
+    @staticmethod
+    def _cache_key(upstream: SourceRepository, kind: str) -> str:
+        if upstream.source_provider == "github":
+            return f"{kind}-{upstream.source_id}"
+        return f"external-{upstream.source_provider}-{upstream.source_id}"
 
     def status(self, next_sync: datetime | None = None) -> dict[str, Any]:
         with self.database.session_factory() as session:
@@ -518,6 +676,7 @@ class SyncService:
             "counts": {
                 "owned": total_by_kind.get(RepositoryKind.OWNED.value, 0),
                 "starred": total_by_kind.get(RepositoryKind.STARRED.value, 0),
+                "external": total_by_kind.get(RepositoryKind.EXTERNAL.value, 0),
                 "active": total_by_status.get(RepositoryStatus.ACTIVE.value, 0),
                 "syncing": total_by_status.get(RepositoryStatus.SYNCING.value, 0),
                 "unavailable": total_by_status.get(RepositoryStatus.UNAVAILABLE.value, 0),

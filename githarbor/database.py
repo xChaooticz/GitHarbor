@@ -30,7 +30,7 @@ class Database:
             yield session
 
 
-def run_migrations(database_url: str) -> None:
+def run_migrations(database_url: str, revision: str = "head") -> None:
     if database_url.startswith("sqlite:///"):
         path = Path(database_url.removeprefix("sqlite:///"))
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,4 +42,4 @@ def run_migrations(database_url: str) -> None:
     config = Config()
     config.set_main_option("script_location", str(script_location))
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
+    command.upgrade(config, revision)

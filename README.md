@@ -14,9 +14,12 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-GitHarbor continuously discovers repositories owned and starred by one GitHub account and mirrors
-their Git data, populated wikis, releases, release assets, and owned-repository container packages
-into separate Gitea namespaces. Its
+GitHarbor continuously discovers repositories owned and starred by one GitHub account, loads
+explicit Forgejo and GitLab repositories from an optional file, and mirrors their Git data into
+Gitea. All sources support LFS and native release metadata; populated GitHub wikis and explicitly
+configured external wiki Git repositories are mirrored separately. GitHub and Forgejo also support
+safe release-asset transfers. GitHub-owned sources can additionally preserve linked container
+packages. Its
 defining rule is preservation: a repository that vanishes, becomes inaccessible, is transferred,
 or is unstarred remains in Gitea. GitHarbor records the change in state and never automatically
 deletes a destination repository.
@@ -24,18 +27,21 @@ deletes a destination repository.
 ## Features
 
 - Complete bare Git mirrors: branches, tags, history, notes, and other refs via `git push --mirror`
+- Persistent validated source caches with incremental fetch, automatic recovery, garbage collection,
+  and stale-entry expiry
+- Optional versioned TOML inventory for explicit Forgejo and GitLab repositories
 - Authenticated Git LFS object preservation across all mirrored refs
-- Native Gitea wiki mirrors with complete GitHub wiki history and empty-wiki detection
+- Native Gitea wiki mirrors with complete source history and empty-wiki detection
 - Native Gitea release metadata and streamed release-asset mirroring with size-limit safeguards
 - Opt-in multi-platform container mirroring for packages linked to owned repositories, with
   all-image or latest-image retention
-- Stable GitHub repository IDs for rename/transfer detection
-- GitHub repository descriptions copied into Gitea with clear mirror provenance
+- Stable provider/source identities for rename and transfer tracking
+- Source repository descriptions copied into Gitea with clear mirror provenance
 - Collision-proof starred naming and guarded Gitea ownership markers
 - Independent, paginated owned/starred discovery with transient API retries and rate-limit reporting
 - SQLite state with WAL mode and versioned Alembic migrations
 - Six-hour scheduler by default, startup sync, manual global sync, and repository retry
-- Global and per-repository synchronization locks
+- Configurable bounded repository concurrency plus global and per-repository synchronization locks
 - Responsive FastAPI/Jinja dashboard, filtering, detail pages, history, and a small REST API
 - Structured JSON logs with credential redaction
 - Non-root, health-checked, single-container Docker deployment
@@ -43,21 +49,22 @@ deletes a destination repository.
 ## Architecture
 
 GitHarbor is one Python process. FastAPI serves the UI/API, an asyncio scheduler invokes the
-reconciliation service, HTTPX clients speak to GitHub and Gitea, and SQLAlchemy stores inventory and
-run history in SQLite. Each repository operation clones a bare mirror into an isolated OS temporary
-directory, transfers referenced LFS objects, pushes the refs, and removes the directory. There are no
-persistent working trees. Populated GitHub wikis are mirrored separately through their Git
-repositories into Gitea's native wiki repositories. Releases and their assets are reconciled after
-the Git push through the GitHub and Gitea APIs. Owned-repository container packages are discovered
-through the GitHub Packages API and copied registry-to-registry with Skopeo when enabled.
+reconciliation service, HTTPX clients speak to the source providers and Gitea, and SQLAlchemy stores
+inventory and run history in SQLite. Each repository has a persistent bare-mirror cache: the first
+run clones it, later runs fetch only changes, and the resulting refs and reachable LFS objects are
+pushed to Gitea. There are no working trees. Populated GitHub wikis and explicitly configured
+external wikis are mirrored separately into Gitea's native wiki repositories. Releases and their
+assets are reconciled after the Git push through provider and Gitea APIs. Owned-repository container
+packages are discovered through the GitHub Packages API and copied registry-to-registry with Skopeo
+when enabled.
 
 See [Architecture decisions](docs/architecture.md) for identity, naming, safety, and failure rules.
 
 ## Quick start with Docker Compose
 
 New to GitHarbor? The complete [Getting started guide](docs/wiki/Getting-Started.md) explains Docker
-networking, the GitHub and Gitea tokens, Gitea organizations, Git LFS, first-run verification, and
-security.
+networking, source and Gitea tokens, destination organizations, Git LFS, external repositories,
+first-run verification, and security.
 
 ```sh
 cp .env.example .env
@@ -73,7 +80,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.6.6` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.7.0` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -90,8 +97,9 @@ Set `GITHARBOR_BIND_ADDRESS=127.0.0.1` when only the Docker host or a local reve
 reach it. GitHarbor has no built-in user authentication, so never expose this port directly to an
 untrusted network or the internet.
 
-The named volume `githarbor-data` contains SQLite state. Gitea itself stores the preserved Git data.
-Back up both the Gitea installation and this volume.
+The named volume `githarbor-data` contains SQLite state and the persistent bare-mirror cache. Gitea
+itself stores the preserved destination data. Back up both the Gitea installation and this volume;
+the cache is reconstructable, but retaining it avoids downloading every source history again.
 
 ## Updating GitHarbor
 
@@ -105,7 +113,7 @@ files first. The ignored `.env` file is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.6
+git checkout v0.7.0
 ```
 
 When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
@@ -138,17 +146,25 @@ required scopes, enterprise notes, and rotation instructions.
 Organization SSO restrictions still apply. A GitHub `404` can mean deletion, lost access, or an SSO
 authorization problem; GitHarbor therefore treats absence as state, never as permission to delete.
 
+### External Forgejo and GitLab sources
+
+Public external repositories normally need no token. A private entry uses `token_env` to name a
+read-only environment variable; the token itself stays in `.env`, never in TOML or a URL. It must
+allow provider API metadata/release reads and HTTPS Git/LFS/wiki reads. GitLab commonly uses
+`read_api` and `read_repository`; Forgejo permissions vary by server version. See
+[External sources](docs/wiki/External-Sources.md) for setup and provider limitations.
+
 ### Gitea
 
 Create an API token for a dedicated Gitea account. It needs repository read/write access, permission
-to create repositories in both configured organizations (or in its own user namespace), and Git
+to create repositories in all configured organizations (or in its own user namespace), and Git
 push access. With scoped-token Gitea versions and organization destinations, grant `read:user`,
 `write:organization`, and `write:repository`. Add `write:package` when container packages are
 enabled. A personal-user destination needs `write:user` instead of `read:user`. GitHarbor verifies
 `/api/v1/user` and accepts a destination namespace only when it is
 an organization accessible to the token or the authenticated user's own namespace. The
-[Gitea organizations guide](docs/wiki/Gitea-Organizations.md) covers the recommended two-organization
-layout.
+[Gitea organizations guide](docs/wiki/Gitea-Organizations.md) covers the two GitHub destinations and
+the recommended optional external-source organization.
 
 Within GitHarbor, tokens stay in environment memory. They are not persisted to SQLite, HTML, API
 output, Git config, or command arguments. Git authentication uses a temporary askpass helper whose
@@ -171,21 +187,25 @@ in the Docker host's configured credential store when a private deployment image
 | `GITEA_STARRED_NAMESPACE` | required | Gitea user or organization for starred repositories |
 | `SYNC_INTERVAL` | `6h` | Positive seconds or `s`, `m`, `h`, `d` duration |
 | `SYNC_ON_STARTUP` | `true` | Run discovery and synchronization after startup |
+| `SYNC_CONCURRENCY` | `3` | Repositories mirrored concurrently during a global run (`1`–`32`) |
 | `DATABASE_PATH` | `/data/githarbor.db` | Persistent SQLite path |
 | `DESTINATION_PRIVATE` | `true` | Create new Gitea destinations as private |
 | `API_TIMEOUT_SECONDS` | `30` | Per-request API timeout |
-| `WIKI_ENABLED` | `true` | Mirror populated GitHub wikis |
-| `RELEASES_ENABLED` | `true` | Mirror GitHub release metadata |
+| `WIKI_ENABLED` | `true` | Mirror populated GitHub and explicitly configured external wikis |
+| `RELEASES_ENABLED` | `true` | Mirror supported source-provider release metadata |
 | `RELEASE_ASSETS_ENABLED` | `true` | Mirror assets when release mirroring is enabled |
 | `RELEASE_ASSET_MODE` | `all` | Asset retention: `all` releases or only `latest` stable release |
 | `RELEASE_ASSET_TIMEOUT_SECONDS` | `3600` | Per release-asset download or upload timeout |
-| `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned repositories |
+| `PACKAGES_ENABLED` | `false` | Mirror container packages linked to owned GitHub repositories |
 | `GITHUB_CONTAINER_REGISTRY` | `ghcr.io` | Source container registry host |
 | `CONTAINER_IMAGE_MODE` | `all` | Container retention: every digest or the literal `latest` digest |
 | `PACKAGE_MAX_BYTES` | `0` | Conservative per-image size ceiling; `0` disables it |
 | `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Per Skopeo registry operation timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
-| `GIT_TIMEOUT_SECONDS` | `3600` | Clone or push timeout per command |
+| `GIT_TIMEOUT_SECONDS` | `3600` | Clone, fetch, or push timeout per command |
+| `GIT_CACHE_PATH` | `/data/git-mirrors` | Persistent bare-mirror cache used for incremental Git and LFS fetches |
+| `GIT_CACHE_RETENTION_DAYS` | `30` | Retain cache entries absent from discovery; `0` removes them immediately |
+| `EXTERNAL_SOURCES_FILE` | unset | Read-only TOML inventory for Forgejo and GitLab repositories |
 | `ADMIN_ACTIONS_ENABLED` | `false` | Enable guarded stop-sync and bulk organization-reset dashboard controls |
 | `ADMIN_ACTIONS_TOKEN` | required when admin actions are enabled | Separate token required for every admin action; never use `GITEA_TOKEN` |
 | `LOG_LEVEL` | `INFO` | JSON log threshold |
@@ -202,21 +222,69 @@ adds the stable-ID suffix `--gh123456` only when normalization or an existing de
 real collision. Existing legacy names are shortened automatically when the clean destination is
 available; assignments remain fixed across later upstream renames and transfers.
 
-Each Gitea description starts with the GitHub repository's description and ends with readable mirror
-provenance plus a management marker containing the GitHub ID and repository kind. Description
-changes made on GitHub are copied on the next sync. Before every push, an existing destination must
+Each Gitea description starts with the source repository's description and ends with readable mirror
+provenance plus a management marker containing its provider, stable ID, and repository kind.
+Description changes are copied on the next sync. Before every push, an existing destination must
 have the exact expected marker; a missing or mismatched marker stops the operation rather than
 overwriting an unrelated repository.
 
-Successful discovery updates records by `(github_id, kind)`. Missing owned repositories become
-`unavailable`; missing starred repositories become `unstarred`. Neither transition calls a Gitea
-delete API. Reappearing IDs become active and resume synchronization. An individual sync error marks
-only that record `error`; the rest of a global run continues.
+Successful discovery updates records by provider, stable source ID, and kind. Missing owned or
+external repositories become `unavailable`; missing starred repositories become `unstarred`.
+Neither transition calls a Gitea delete API. Reappearing IDs become active and resume
+synchronization. An individual sync error marks only that record `error`; the rest of a global run
+continues.
+
+## Forgejo and GitLab sources
+
+Set `EXTERNAL_SOURCES_FILE=/config/external-sources.toml` and mount a file based on
+[`external-sources.example.toml`](external-sources.example.toml) into the container:
+
+```toml
+version = 1
+
+[[repositories]]
+provider = "forgejo"
+clone_url = "https://git.eden-emu.dev/eden-emu/eden.git"
+wiki_url = "https://git.eden-emu.dev/eden-emu/eden.wiki.git"
+destination_namespace = "external-backups"
+```
+
+GitHarbor asks the provider API for the stable repository ID, name, description, and default branch.
+The example above therefore becomes destination `external-backups/eden`, using Forgejo repository ID
+`2` namespaced to `git.eden-emu.dev`; neither value needs to be copied into the file. An optional
+explicit `id` remains available as a backward-compatible identity override; the provider metadata
+API is still required. Once assigned, the identity and destination are retained. `clone_url` and
+`wiki_url` must be HTTP(S) Git URLs without
+embedded credentials. `wiki_url` is optional: when omitted, GitHarbor performs no wiki lookup or
+wiki synchronization for that entry.
+
+For a private source, set `token_env = "EDEN_FORGEJO_TOKEN"` in TOML and provide that variable to
+the container separately. GitLab defaults the Git username to `oauth2`; Forgejo defaults it to
+`git`. Override `git_username` only when the source instance requires another value. Authenticated
+source URLs must use HTTPS.
+
+External sources preserve Git refs, history, notes, tags, and reachable LFS objects. A configured
+wiki preserves its separate Git history and attachments. Native release metadata is mirrored through
+the provider API by default; Forgejo release attachments with a declared size are copied too. GitLab
+release asset links do not provide a trustworthy byte size, so they produce a durable skip warning
+instead of bypassing Gitea's attachment safeguards. Set `releases = false` or
+`release_assets = false` on an entry when desired. GitHub container-package discovery remains
+limited to owned GitHub repositories.
+
+The full field reference, private-token configuration, namespace guidance, and verification steps
+are in [External sources](docs/wiki/External-Sources.md).
 
 ## Git semantics and LFS
 
-`git clone --mirror` followed by `git push --mirror` preserves ordinary Git objects and refs,
-including force pushes and upstream ref deletions. GitHarbor retries a destination push after
+GitHarbor creates a persistent bare `git clone --mirror` cache for each source repository. Later
+synchronizations run `git fetch --prune` into that cache before `git push --mirror`, so only new Git
+objects need to be fetched and uploaded. The cache is stored under `GIT_CACHE_PATH` (on the default
+Docker `/data` volume). It can be discarded while GitHarbor is stopped; the next synchronization
+recreates it. This cache is validated before reuse and automatically rebuilt if it is invalid or
+corrupt. Active caches receive `git gc --auto`, and entries absent from successful discovery expire after
+`GIT_CACHE_RETENTION_DAYS`. GitHarbor processes up to `SYNC_CONCURRENCY` repositories at once. This
+preserves ordinary Git objects and refs, including force pushes and upstream ref deletions.
+GitHarbor retries a destination push after
 transient HTTP gateway failures such as 502, 503, or 504; a retry is safe because the mirror push is
 idempotent. Deleting an upstream branch or tag therefore also deletes that ref from the
 GitHarbor-managed destination; deleting the destination repository itself never happens
@@ -225,7 +293,7 @@ automatically.
 GitHub's read-only `refs/pull/*` namespace conflicts with Gitea's own pull-request refs. GitHarbor
 preserves those commits under `refs/githarbor/github-pull/*` before pushing, avoiding Gitea hook
 rejections without discarding PR-only history. After each ref push, GitHarbor sets Gitea's default
-branch to the current GitHub default branch.
+branch to the source provider's current default branch.
 
 With `GIT_LFS_ENABLED=true` (the default), GitHarbor runs authenticated `git lfs fetch --all` against
 the source and `git lfs push --all` against a named destination remote before it publishes Git refs.
@@ -239,35 +307,37 @@ history and are not copied.
 
 ## Wiki mirroring
 
-GitHarbor reads GitHub's repository-level wiki capability flag on every discovery or individual
-sync. Disabled wikis are skipped without another network operation. For an enabled wiki, GitHarbor
-checks the separate `<repository>.wiki.git` remote for refs; an enabled but never-created wiki is
-also skipped.
+For GitHub, GitHarbor reads the repository-level wiki capability flag on every discovery or
+individual sync. Disabled wikis are skipped without another network operation. External sources are
+checked only when their separate `wiki_url` is explicitly configured; omission skips the wiki
+without guessing or probing a URL. An enabled but never-created or otherwise empty wiki is skipped.
 
 When pages exist, GitHarbor enables the native wiki unit on the managed Gitea destination and uses a
 bare mirror push to preserve every wiki commit and ref. Like the primary Git mirror, this makes the
-GitHub wiki authoritative: an upstream wiki force-update or ref deletion is reflected in Gitea.
-GitHub wiki attachments committed into the wiki repository are ordinary Git objects and are
-preserved. A wiki clone or push failure is recorded as a warning and marks the run `partial` after
-the primary repository has been preserved.
+source wiki authoritative: an upstream force-update or ref deletion is reflected in Gitea. Wiki
+attachments committed into the wiki repository are ordinary Git objects and are
+preserved. A configured wiki clone or push failure marks the repository and run `error` after the
+primary repository has been preserved, so the incomplete optional layer is visible and retryable.
 Set `WIKI_ENABLED=false` to skip wiki checks and updates. Existing Gitea wiki data is retained.
 
 ## Release and release-asset mirroring
 
-After the Git refs (including release tags) are current, GitHarbor lists GitHub releases and creates
-or updates native Gitea releases. It preserves the tag, title, Markdown body, target commitish,
-draft state, and prerelease state. A hidden marker appended to the Gitea release body records the
-GitHub release ID and managed asset IDs without changing the visible source text. GitHarbor refuses
-to overwrite an existing same-tag Gitea release that lacks this ownership marker.
+After the Git refs (including release tags) are current, GitHarbor lists releases through the
+GitHub, Forgejo, or GitLab API and creates or updates native Gitea releases. It preserves the tag,
+title, Markdown body, target commitish, draft state, and prerelease state. A hidden marker appended
+to the Gitea release body records the source release ID and managed asset IDs without changing the
+visible source text. GitHarbor refuses to overwrite an existing same-tag Gitea release that lacks
+this ownership marker. Already-correct releases are left unchanged, avoiding unnecessary Gitea
+PATCH requests, and attachment data returned with the release list is reused.
 
 `RELEASES_ENABLED=false` skips both release metadata and assets without deleting existing Gitea
 releases. With releases enabled, `RELEASE_ASSETS_ENABLED=false` continues updating release metadata
 but leaves all existing attachments untouched.
 
 Assets are downloaded and uploaded one at a time through an isolated temporary file. GitHarbor
-checks the downloaded byte count and verifies GitHub's SHA-256 digest when one is available. It asks
+checks the downloaded byte count and verifies a source SHA-256 digest when one is available. It asks
 Gitea's attachment-settings API for the advertised per-file maximum and skips an oversized asset
-before downloading it. Attachments disabled by Gitea, GitHub assets that are not fully uploaded,
+before downloading it. Attachments disabled by Gitea, source assets that are not fully uploaded,
 HTTP `413` responses, reverse-proxy or storage rejections, and individual transfer failures are also
 skipped without failing the Git or release-metadata mirror.
 
@@ -279,16 +349,18 @@ successful proactive check cannot guarantee the upload will be accepted. Adjust
 `RELEASE_ASSET_TIMEOUT_SECONDS` for slow large transfers.
 
 `RELEASE_ASSET_MODE=all` mirrors assets for every visible release. `latest` still mirrors metadata
-for every visible release but retains assets only on GitHub's latest published stable release, as
-reported by GitHub's dedicated latest-release API. Drafts and prereleases are not candidates. When
-the latest release changes, GitHarbor uploads its assets and deletes assets it previously managed
+for every visible release but retains assets only on the source provider's latest published stable
+release. Drafts and prereleases are not candidates. When the latest release changes, GitHarbor
+uploads its assets and deletes assets it previously managed
 from older releases. If any new-latest asset fails, older assets are retained until a later retry
 succeeds. Switching back to `all` restores eligible older assets on the next sync.
 
 For safety, GitHarbor deletes a stale managed asset only when its recorded Gitea ID, name, and size
 still match. Externally changed assets are retained with a warning, and releases absent from the
-current GitHub response are retained. Gitea authorship and creation timestamps, GitHub asset labels,
-and download counts cannot be recreated through the target API.
+current source response are retained. Gitea authorship and creation timestamps, source asset labels,
+and download counts cannot be recreated through the target API. Forgejo attachments require a
+declared size and safe same-origin URL; GitLab links without a trustworthy size are skipped with a
+durable warning.
 
 ## Container package mirroring
 
@@ -368,11 +440,13 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
 - **Destination marker refusal:** GitHarbor found a repository at the desired Gitea path but cannot
   prove it manages that repository. Move/rename the unrelated repository; do not forge markers.
 - **Repository remains unavailable/unstarred:** this is expected preservation behavior. Restore
-  GitHub access or star status; the next discovery uses the stable ID and resumes.
+  source access, restore the star, or re-add the external entry; the next complete discovery uses
+  the stable ID and resumes.
 - **Private clone fails after API discovery:** ensure the classic GitHub PAT has `repo`, can access
   that repository, and has any required organization SSO authorization.
 - **SQLite cannot open:** ensure the container's UID 10001 can write the mounted `/data` directory.
-- **Large repository timeout:** raise `GIT_TIMEOUT_SECONDS`; temporary space must fit one bare clone.
+- **Large repository timeout:** raise `GIT_TIMEOUT_SECONDS` and check cache-disk capacity. The first
+  run downloads a complete bare mirror; later runs normally fetch only changes.
 - **LFS upload fails:** verify Gitea has `LFS_START_SERVER = true`, the token can write the repository,
   and its LFS storage has enough free space. Git refs are intentionally withheld on LFS failure.
 - **Release asset is skipped:** inspect **Last warning** on the repository page. Compare the asset
@@ -390,6 +464,8 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
   package mirroring may be added as a separate opt-in mode in a future release
 - Release authorship/timestamps, asset labels/download counts, and deleted source releases are not
   reproduced; GitHarbor preserves the last managed release instead
+- GitLab release links without a trustworthy byte size are reported and skipped; external container
+  packages are not mirrored
 - In-process locks do not coordinate multiple GitHarbor containers; run one replica
 - Destination repository visibility is applied only at creation
 

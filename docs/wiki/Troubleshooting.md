@@ -23,7 +23,7 @@ docker compose logs githarbor
 do not share its output publicly without reviewing it. Confirm `.env` exists beside
 `docker-compose.yml`. The supplied volume path must be writable by container UID `10001`.
 
-## Gitea or GitHub connection fails
+## Gitea, GitHub, or external provider connection fails
 
 - Confirm the provider URL works from the Docker host.
 - Remember that `localhost` inside a container points to that container. For Gitea on Docker Desktop,
@@ -32,6 +32,11 @@ do not share its output publicly without reviewing it. Confirm `.env` exists bes
 - For a private certificate authority, add its CA certificate to a derived image or trusted runtime
   configuration. Do not disable TLS verification or send tokens over untrusted plain HTTP.
 - Recreate the container after editing `.env`; a restart alone retains the old environment.
+
+For an external source, also verify that the provider matches the server (`forgejo` or `gitlab`),
+the clone URL contains the full owner/group and repository path, and the provider API is available
+at the default `/api/v1` or `/api/v4` base. A custom `api_url` must use the same origin as the clone
+URL.
 
 ## `GITHUB_USERNAME` mismatch
 
@@ -58,6 +63,36 @@ created `GITHUB_TOKEN` and whose stars should be listed.
 If a previously known star disappears, GitHarbor marks it `unstarred` and preserves its Gitea copy.
 Starring it again reactivates the same record on the next successful discovery.
 
+## External sources file is ignored or rejected
+
+Confirm all three deployment pieces agree:
+
+1. `.env` contains `EXTERNAL_SOURCES_FILE=/config/external-sources.toml`.
+2. `docker-compose.yml` mounts the host file at that exact container path with `:ro`.
+3. The host file exists and starts with `version = 1`.
+
+The whole file is validated before external discovery. Unknown fields, malformed TOML, duplicate
+clone URLs or destinations, invalid names, credentials embedded in URLs, and cross-origin
+`api_url` values reject it. The error names the failing field. A missing or invalid file preserves
+existing external inventory states and Gitea repositories rather than marking everything
+unavailable.
+
+An individual external retry reloads the file, so the entry must still be present and valid. After
+editing `.env` or the Compose mount, recreate the container; after editing only the mounted TOML
+contents, start another sync.
+
+## Private external source returns `401`, `403`, or `404`
+
+Check that `token_env` is the name of an environment variable—not the token value—and that the named
+variable exists in the container. With the supplied Compose file, values in `.env` are loaded
+through `env_file`. The source token needs provider API read access plus Git/LFS/wiki read access.
+GitLab commonly needs `read_api` and `read_repository`.
+
+Authenticated clone, API, and wiki URLs must use HTTPS, and an authenticated wiki must share the
+clone URL's origin. GitLab defaults the Git username to `oauth2`; Forgejo defaults it to `git`.
+Override `git_username` only when the server requires it. As with GitHub, a `404` may mean the token
+cannot see a private repository.
+
 ## Gitea returns `401` or `403`
 
 For organization destinations, the token needs:
@@ -66,9 +101,9 @@ For organization destinations, the token needs:
 - `write:organization`
 - `write:repository`
 
-The token account must also be an owner of both destination organizations, or otherwise have normal
-Gitea permission to create and push repositories. For a personal-user destination, use `write:user`
-instead of `read:user`.
+The token account must also be an owner of all selected destination organizations, or otherwise have
+normal Gitea permission to create and push repositories. This includes each external entry's
+`destination_namespace`. For a personal-user destination, use `write:user` instead of `read:user`.
 
 Tokens from older Gitea versions may not have granular scope controls. Use a dedicated account and
 upgrade Gitea when practical.
@@ -99,9 +134,9 @@ Check all of the following:
 
 1. Gitea has `LFS_START_SERVER = true` and was restarted after the change.
 2. `GIT_LFS_ENABLED=true` in the active container environment.
-3. The GitHub token can read the source repository contents and LFS objects.
+3. The applicable GitHub or external source token can read repository contents and LFS objects.
 4. The Gitea token can write the destination repository.
-5. Gitea's LFS storage and the Docker host's temporary storage have free space.
+5. Gitea's LFS storage and GitHarbor's persistent cache volume have free space.
 6. Reverse proxies allow the LFS request size and duration.
 
 GitHarbor uploads LFS objects before publishing Git refs. On failure, it intentionally retains the
@@ -141,6 +176,11 @@ GitHarbor queries Gitea's attachment-settings API and skips files that exceed it
 before downloading them. That API cannot reveal a stricter reverse-proxy limit, so GitHarbor also
 catches an actual HTTP `413` or other upload rejection, records the warning, continues with the next
 asset, and retries the skipped asset on a later sync.
+
+Forgejo attachments also require a declared byte size and safe same-origin download URL. GitLab
+release asset links lack a trustworthy byte size in the supported API response, so GitHarbor skips
+them deliberately and records a warning. Configure `release_assets = false` for that external entry
+to suppress expected GitLab asset work while retaining release metadata and Git tags.
 
 ## Release creation returns `422`
 
@@ -194,10 +234,12 @@ guide also requires a sufficiently large body limit for large uploads.
 
 ## A destination opens on the wrong default branch
 
-GitHarbor follows GitHub's configured default branch; it does not force every repository to `main`.
+GitHarbor follows the source provider's configured default branch; it does not force every
+repository to `main`.
 After the primary Git push, a successful or partial sync applies that branch to Gitea. Trigger a
 repository sync after upgrading. If it still differs, compare the repository's **Default branch** in
-GitHub with the value on its GitHarbor detail page and include both values in a redacted report.
+the source provider with the value on its GitHarbor detail page and include both values in a
+redacted report.
 
 ## Container package is missing or skipped
 
@@ -223,19 +265,33 @@ reported in **Last warning**. A failed new-latest transfer keeps the previously 
 
 ## Large repository times out
 
-Increase `GIT_TIMEOUT_SECONDS`, then recreate the container. Temporary storage must fit one complete
-bare clone plus its reachable LFS objects. API timeouts are controlled separately by
-`API_TIMEOUT_SECONDS`.
+Increase `GIT_TIMEOUT_SECONDS`, then recreate the container. The first synchronization must download
+a complete bare mirror plus reachable LFS objects into `GIT_CACHE_PATH`; later runs normally fetch
+only changed objects. Confirm the persistent volume has enough free space, and reduce
+`SYNC_CONCURRENCY` if simultaneous large repositories saturate memory, disk I/O, network bandwidth,
+or the providers. API timeouts are controlled separately by `API_TIMEOUT_SECONDS`.
+
+## Cache is corrupt or consumes too much space
+
+GitHarbor validates each bare mirror before reuse and automatically rebuilds an invalid entry. A
+rebuild downloads the full source again but does not alter the existing Gitea destination until a
+complete replacement is ready. Active entries receive `git gc --auto`.
+
+Entries absent from successful discovery expire after `GIT_CACHE_RETENTION_DAYS`; set a shorter
+period to reduce retained storage, or `0` for immediate expiry. Failed discovery does not authorize
+cleanup. For manual recovery, stop GitHarbor before moving the cache root aside, then start it and
+retry; do not edit a cache while workers may be using it.
 
 ## Repository is `unavailable` or `unstarred`
 
 These are preserved states:
 
-- `unavailable`: an owned repository was absent from a complete successful discovery.
+- `unavailable`: an owned repository was absent from complete successful discovery, or an external
+  repository was removed from a valid external-sources file.
 - `unstarred`: a starred repository was absent from a complete successful star listing.
 
-GitHarbor does not delete the Gitea repository. Restore GitHub access or the star and run discovery
-again; the stable numeric GitHub ID reconnects the record.
+GitHarbor does not delete the Gitea repository. Restore source access or the star, or re-add the
+external entry, and run discovery again; the stable provider identity reconnects the record.
 
 ## A scheduled run did not happen
 
@@ -243,6 +299,8 @@ again; the stable numeric GitHub ID reconnects the record.
 - Check that `SYNC_INTERVAL` is valid, such as `30m`, `6h`, or `1d`.
 - Remember that the interval resets after process restart.
 - Check for a still-running large synchronization; overlapping global runs are rejected.
+- Check whether the configured `SYNC_CONCURRENCY` and repository sizes make one run longer than the
+  interval. The next scheduled delay begins after the current run completes.
 
 ## Ask for help safely
 

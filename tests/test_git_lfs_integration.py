@@ -57,13 +57,28 @@ async def test_mirror_preserves_lfs_objects_from_every_branch(tmp_path: Path) ->
     run_git("remote", "add", "origin", str(source_bare), cwd=source_work)
     run_git("push", "--all", "origin", cwd=source_work)
 
-    mirror = GitMirror(timeout_seconds=60, lfs_enabled=True)
+    mirror = GitMirror(
+        timeout_seconds=60,
+        lfs_enabled=True,
+        cache_path=tmp_path / "git-mirror-cache",
+    )
     await mirror.mirror(
         source_url=str(source_bare),
         source_token="",
         destination_url=str(destination_bare),
         destination_token="",
         destination_username="",
+        cache_key="owned-123",
+    )
+    # A cached second run must update the existing destination remote rather than trying to add it
+    # again, and should reuse the LFS objects retained in the bare mirror.
+    await mirror.mirror(
+        source_url=str(source_bare),
+        source_token="",
+        destination_url=str(destination_bare),
+        destination_token="",
+        destination_username="",
+        cache_key="owned-123",
     )
 
     shutil.rmtree(source_bare)

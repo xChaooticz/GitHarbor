@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -83,18 +84,25 @@ class FakeGitea:
         self.next_release_id = 1
         self.next_asset_id = 10
         self.uploads = 0
+        self.creates = 0
+        self.updates = 0
+        self.asset_lists = 0
         self.deleted_assets: list[int] = []
 
     async def attachment_settings(self) -> AttachmentSettings | None:
         return self.settings
 
     async def list_releases(self, _namespace: str, _name: str) -> list[GiteaRelease]:
-        return list(self.releases.values())
+        return [
+            replace(release, assets=tuple(self.assets[release_id].values()))
+            for release_id, release in self.releases.items()
+        ]
 
     async def create_release(
         self, _namespace: str, _name: str, payload: dict[str, Any]
     ) -> GiteaRelease:
-        release = GiteaRelease(self.next_release_id, str(payload["tag_name"]), str(payload["body"]))
+        self.creates += 1
+        release = self._release_from_payload(self.next_release_id, payload)
         self.releases[release.gitea_id] = release
         self.assets[release.gitea_id] = {}
         self.next_release_id += 1
@@ -107,14 +115,28 @@ class FakeGitea:
         release_id: int,
         payload: dict[str, Any],
     ) -> GiteaRelease:
-        release = GiteaRelease(release_id, str(payload["tag_name"]), str(payload["body"]))
+        self.updates += 1
+        release = self._release_from_payload(release_id, payload)
         self.releases[release_id] = release
         return release
 
     async def list_release_assets(
         self, _namespace: str, _name: str, release_id: int
     ) -> list[GiteaAttachment]:
+        self.asset_lists += 1
         return list(self.assets[release_id].values())
+
+    @staticmethod
+    def _release_from_payload(release_id: int, payload: dict[str, Any]) -> GiteaRelease:
+        return GiteaRelease(
+            release_id,
+            str(payload["tag_name"]),
+            str(payload["body"]),
+            name=str(payload["name"]),
+            target_commitish=str(payload.get("target_commitish") or ""),
+            draft=bool(payload["draft"]),
+            prerelease=bool(payload["prerelease"]),
+        )
 
     async def upload_release_asset(
         self,
@@ -173,14 +195,38 @@ async def test_release_assets_are_idempotent_and_oversized_assets_warn() -> None
     assert "exceeds Gitea's advertised 1.0 MiB limit" in warnings[0]
     assert github.downloads == [201]
     assert gitea.uploads == 1
+    assert gitea.creates == 1
+    assert gitea.updates == 1
+    assert gitea.asset_lists == 1
 
     warnings = await service.mirror("octocat/project", "archive", "project")
     assert len(warnings) == 1
     assert github.downloads == [201]
     assert gitea.uploads == 1
+    assert gitea.creates == 1
+    assert gitea.updates == 1
+    assert gitea.asset_lists == 1
     marker = decode_release_marker(gitea.releases[1].body)
     assert marker is not None
     assert marker.assets[201].name == "small.zip"
+
+
+@pytest.mark.asyncio
+async def test_unchanged_release_metadata_avoids_updates() -> None:
+    source = source_release()
+    github = FakeGitHub([source], {})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+
+    await service.mirror("octocat/project", "archive", "project")
+    await service.mirror("octocat/project", "archive", "project")
+    assert gitea.creates == 1
+    assert gitea.updates == 0
+
+    github.releases = [replace(source, name="Renamed release", body="Updated notes.")]
+    await service.mirror("octocat/project", "archive", "project")
+    assert gitea.updates == 1
+    assert gitea.releases[1].name == "Renamed release"
 
 
 @pytest.mark.asyncio

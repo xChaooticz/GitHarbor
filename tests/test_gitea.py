@@ -13,13 +13,38 @@ from githarbor.clients.gitea import (
     GiteaAssetTooLarge,
     GiteaClient,
     GiteaError,
+    GiteaRelease,
     managed_repository_description,
     management_marker,
 )
 
 
+def test_gitea_release_includes_metadata_and_embedded_assets() -> None:
+    release = GiteaRelease.from_gitea(
+        {
+            "id": 7,
+            "tag_name": "v1.0.0",
+            "name": "Release v1.0.0",
+            "body": "Notes",
+            "target_commitish": "main",
+            "draft": True,
+            "prerelease": False,
+            "assets": [{"id": 9, "name": "archive.zip", "size": 123}],
+        }
+    )
+
+    assert release.name == "Release v1.0.0"
+    assert release.target_commitish == "main"
+    assert release.draft is True
+    assert release.assets is not None
+    assert release.assets[0].name == "archive.zip"
+
+
 def test_management_marker_uses_stable_identity() -> None:
     assert management_marker(123, "starred") == "GitHarbor managed; github-id:123; kind:starred"
+    assert management_marker("eden-server", "external", "forgejo") == (
+        "GitHarbor managed; source-provider:forgejo; source-id:eden-server; kind:external"
+    )
 
 
 def test_managed_description_preserves_source_text_and_provenance() -> None:
@@ -29,6 +54,12 @@ def test_managed_description_preserves_source_text_and_provenance() -> None:
         "An example project\n\n"
         "Mirrored from GitHub: octo-user/project. "
         "GitHarbor managed; github-id:123; kind:starred"
+    )
+    assert managed_repository_description(
+        None, "eden/server", "eden-server", "external", "forgejo"
+    ) == (
+        "Mirrored from Forgejo: eden/server. GitHarbor managed; source-provider:forgejo; "
+        "source-id:eden-server; kind:external"
     )
 
 

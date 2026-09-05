@@ -22,6 +22,9 @@ def test_redacts_explicit_secret_and_url_credentials() -> None:
 def test_git_command_construction_uses_argument_arrays() -> None:
     path = Path("/tmp/repository.git")
     clone = GitMirror.clone_command("https://github.test/a/b.git", path)
+    set_remote = GitMirror.set_remote_url_command(path, "https://github.test/a/b-renamed.git")
+    fetch = GitMirror.fetch_command(path)
+    refspec_check = GitMirror.source_refspec_check_command(path)
     push = GitMirror.push_command(path, "https://gitea.test/archive/a--b.git")
     assert clone == ["git", "clone", "--mirror", "--", "https://github.test/a/b.git", str(path)]
     assert push == [
@@ -34,7 +37,25 @@ def test_git_command_construction_uses_argument_arrays() -> None:
         "--",
         "https://gitea.test/archive/a--b.git",
     ]
-    assert all("secret" not in part for part in clone + push)
+    assert set_remote == [
+        "git",
+        "-C",
+        str(path),
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.test/a/b-renamed.git",
+    ]
+    assert fetch == ["git", "-C", str(path), "fetch", "--prune", "origin"]
+    assert refspec_check == [
+        "git",
+        "-C",
+        str(path),
+        "config",
+        "--get-all",
+        "remote.origin.fetch",
+    ]
+    assert all("secret" not in part for part in clone + set_remote + fetch + refspec_check + push)
 
 
 def test_wiki_push_keeps_the_destination_default_branch() -> None:
@@ -80,13 +101,12 @@ def test_lfs_commands_pin_http_endpoints_and_use_a_named_destination_remote() ->
         "--all",
         "origin",
     ]
-    assert GitMirror.add_remote_command(path, destination_url) == [
+    assert GitMirror.configure_destination_remote_command(path, destination_url) == [
         "git",
         "-C",
         str(path),
-        "remote",
-        "add",
-        "githarbor-destination",
+        "config",
+        "remote.githarbor-destination.url",
         destination_url,
     ]
     assert GitMirror.lfs_push_command(path, destination_url) == [

@@ -15,6 +15,7 @@ def utcnow() -> datetime:
 class RepositoryKind(StrEnum):
     OWNED = "owned"
     STARRED = "starred"
+    EXTERNAL = "external"
 
 
 class RepositoryStatus(StrEnum):
@@ -42,18 +43,24 @@ class Repository(Base):
     __tablename__ = "repositories"
     __table_args__ = (
         UniqueConstraint("github_id", "kind", name="uq_repository_github_id_kind"),
+        UniqueConstraint(
+            "source_provider", "source_id", "kind", name="uq_repository_source_identity"
+        ),
         UniqueConstraint("destination_namespace", "destination_name", name="uq_destination"),
         Index("ix_repositories_status_kind", "status", "kind"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    github_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    github_id: Mapped[int | None] = mapped_column(Integer)
+    source_provider: Mapped[str] = mapped_column(String(32), default="github", nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(128))
     node_id: Mapped[str | None] = mapped_column(String(128))
     upstream_owner: Mapped[str] = mapped_column(String(255), nullable=False)
     upstream_name: Mapped[str] = mapped_column(String(255), nullable=False)
     upstream_full_name: Mapped[str] = mapped_column(String(512), nullable=False)
     upstream_url: Mapped[str] = mapped_column(Text, nullable=False)
     clone_url: Mapped[str] = mapped_column(Text, nullable=False)
+    wiki_clone_url: Mapped[str | None] = mapped_column(Text)
     default_branch: Mapped[str | None] = mapped_column(String(255))
     upstream_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     upstream_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -84,6 +91,8 @@ class Repository(Base):
         return {
             "id": self.id,
             "github_id": self.github_id,
+            "source_provider": self.source_provider,
+            "source_id": self.source_id,
             "upstream_owner": self.upstream_owner,
             "upstream_name": self.upstream_name,
             "upstream_full_name": self.upstream_full_name,

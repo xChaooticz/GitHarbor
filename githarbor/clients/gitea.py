@@ -61,13 +61,32 @@ class GiteaRelease:
     gitea_id: int
     tag_name: str
     body: str
+    name: str = ""
+    target_commitish: str = ""
+    draft: bool = False
+    prerelease: bool = False
+    assets: tuple[GiteaAttachment, ...] | None = None
 
     @classmethod
     def from_gitea(cls, data: dict[str, Any]) -> GiteaRelease:
+        assets_payload = data.get("assets") if "assets" in data else None
         return cls(
             gitea_id=int(data["id"]),
             tag_name=str(data["tag_name"]),
             body=str(data.get("body") or ""),
+            name=str(data.get("name") or data["tag_name"]),
+            target_commitish=str(data.get("target_commitish") or ""),
+            draft=bool(data.get("draft", False)),
+            prerelease=bool(data.get("prerelease", False)),
+            assets=(
+                tuple(
+                    GiteaAttachment.from_gitea(item)
+                    for item in assets_payload
+                    if isinstance(item, dict)
+                )
+                if isinstance(assets_payload, list)
+                else None
+            ),
         )
 
 
@@ -111,17 +130,30 @@ class DestinationRepository:
         return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
 
 
-def management_marker(github_id: int, kind: str) -> str:
-    return f"GitHarbor managed; github-id:{github_id}; kind:{kind}"
+def management_marker(source_id: int | str, kind: str, source_provider: str = "github") -> str:
+    if source_provider == "github":
+        return f"GitHarbor managed; github-id:{source_id}; kind:{kind}"
+    return (
+        f"GitHarbor managed; source-provider:{source_provider}; source-id:{source_id}; kind:{kind}"
+    )
 
 
 def managed_repository_description(
     source_description: str | None,
     source_full_name: str,
-    github_id: int,
+    source_id: int | str,
     kind: str,
+    source_provider: str = "github",
 ) -> str:
-    provenance = f"Mirrored from GitHub: {source_full_name}. {management_marker(github_id, kind)}"
+    provider_name = {
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "forgejo": "Forgejo",
+    }.get(source_provider, source_provider)
+    provenance = (
+        f"Mirrored from {provider_name}: {source_full_name}. "
+        f"{management_marker(source_id, kind, source_provider)}"
+    )
     source = (source_description or "").strip()
     if not source:
         return provenance
@@ -385,16 +417,21 @@ class GiteaClient:
         self,
         namespace: str,
         name: str,
-        github_id: int,
+        github_id: int | None,
         kind: str,
         source_full_name: str,
         private: bool,
         source_description: str | None = None,
         fallback_name: str | None = None,
+        source_provider: str = "github",
+        source_id: str | None = None,
     ) -> DestinationRepository:
-        marker = management_marker(github_id, kind)
+        stable_id = source_id if source_id is not None else github_id
+        if stable_id is None:
+            raise ValueError("A source ID is required for destination ownership checks")
+        marker = management_marker(stable_id, kind, source_provider)
         description = managed_repository_description(
-            source_description, source_full_name, github_id, kind
+            source_description, source_full_name, stable_id, kind, source_provider
         )
         existing = await self._optional_request("GET", f"repos/{namespace}/{name}")
         if existing is not None:

@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     gitea_starred_namespace: str = Field(min_length=1)
     sync_interval: int = 21600
     sync_on_startup: bool = True
+    sync_concurrency: int = Field(default=3, ge=1, le=32)
     database_path: Path = Path("/data/githarbor.db")
     destination_private: bool = True
     wiki_enabled: bool = True
@@ -61,6 +62,9 @@ class Settings(BaseSettings):
     package_transfer_timeout_seconds: int = Field(default=3600, ge=30)
     git_lfs_enabled: bool = True
     git_timeout_seconds: int = Field(default=3600, ge=30)
+    git_cache_path: Path = Path("/data/git-mirrors")
+    git_cache_retention_days: int = Field(default=30, ge=0, le=3650)
+    external_sources_file: Path | None = None
     api_timeout_seconds: int = Field(default=30, ge=5)
     release_asset_timeout_seconds: int = Field(default=3600, ge=30)
     admin_actions_enabled: bool = False
@@ -71,6 +75,13 @@ class Settings(BaseSettings):
     @classmethod
     def validate_interval(cls, value: str | int) -> int:
         return parse_interval(value)
+
+    @field_validator("external_sources_file", mode="before")
+    @classmethod
+    def validate_external_sources_file(cls, value: str | Path | None) -> str | Path | None:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("github_username", "gitea_owned_namespace", "gitea_starred_namespace")
     @classmethod

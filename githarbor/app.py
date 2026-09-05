@@ -83,7 +83,11 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             database,
             github,
             gitea,
-            GitMirror(settings.git_timeout_seconds, settings.git_lfs_enabled),
+            GitMirror(
+                settings.git_timeout_seconds,
+                settings.git_lfs_enabled,
+                settings.git_cache_path,
+            ),
             container_mirror,
         )
         scheduler = Scheduler(service, settings.sync_interval, settings.sync_on_startup)

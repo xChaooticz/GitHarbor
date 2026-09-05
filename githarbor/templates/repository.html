@@ -8,7 +8,8 @@
 <section class="panel"><h2>Repository details</h2><dl class="details">
 <dt>Upstream</dt><dd><a href="{{ repository.upstream_url }}" rel="noreferrer">{{ repository.upstream_url }} ↗</a></dd>
 <dt>Destination</dt><dd>{% if repository.destination_url %}<a href="{{ repository.destination_url }}" rel="noreferrer">{{ repository.destination_namespace }}/{{ repository.destination_name }} ↗</a>{% else %}{{ repository.destination_namespace }}/{{ repository.destination_name }} (not created){% endif %}</dd>
-<dt>GitHub ID</dt><dd>{{ repository.github_id }}</dd><dt>First discovered</dt><dd>{{ repository.first_discovered_at }}</dd>
+<dt>Source</dt><dd>{{ repository.source_provider|capitalize }}</dd><dt>Source ID</dt><dd>{{ repository.source_id or repository.github_id }}</dd>
+<dt>First discovered</dt><dd>{{ repository.first_discovered_at }}</dd>
 <dt>Last seen</dt><dd>{{ repository.last_seen_at }}</dd><dt>Last successful sync</dt><dd>{{ repository.last_successful_sync_at or 'Never' }}</dd>
 <dt>Default branch</dt><dd>{{ repository.default_branch or 'Unknown' }}</dd><dt>Private upstream</dt><dd>{{ 'Yes' if repository.upstream_private else 'No' }}</dd>
 </dl></section>

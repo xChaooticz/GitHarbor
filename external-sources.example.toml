@@ -1,0 +1,32 @@
+# Versioned, read-only inventory for repositories outside the configured GitHub account.
+version = 1
+
+[[repositories]]
+provider = "forgejo"
+clone_url = "https://git.eden-emu.dev/eden-emu/eden.git"
+web_url = "https://git.eden-emu.dev/eden-emu/eden"
+destination_namespace = "external-backups"
+# The source API supplies stable repository ID 2, name "eden", description, and default branch.
+# Override the inferred destination name only when needed.
+# destination_name = "eden"
+# Native release metadata is enabled by default. Forgejo attachments are mirrored when they expose
+# a declared byte size. Set releases = false or release_assets = false per entry when desired.
+
+# Wikis are separate Git repositories. Omit this line to skip the wiki.
+wiki_url = "https://git.eden-emu.dev/eden-emu/eden.wiki.git"
+
+# For a private repository, put the token in the named environment variable—not in this file.
+# token_env = "EDEN_FORGEJO_TOKEN"
+# git_username = "git"
+
+[[repositories]]
+provider = "gitlab"
+clone_url = "https://gitlab.example.com/group/project.git"
+destination_namespace = "external-backups"
+# destination_name defaults to the final component of clone_url when omitted.
+# wiki_url = "https://gitlab.example.com/group/project.wiki.git"
+# token_env = "EXAMPLE_GITLAB_TOKEN"
+
+# `id` is optional and normally omitted. It is a backward-compatible identity override; the
+# provider repository metadata API is still required.
+# id = "manually-stable-id"

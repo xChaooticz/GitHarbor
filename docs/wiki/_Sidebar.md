@@ -5,6 +5,7 @@
 - [Tokens and permissions](https://github.com/xChaooticz/GitHarbor/wiki/Tokens-and-Permissions)
 - [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Organizations)
 - [Configuration](https://github.com/xChaooticz/GitHarbor/wiki/Configuration)
+- [External sources](https://github.com/xChaooticz/GitHarbor/wiki/External-Sources)
 - [Container packages](https://github.com/xChaooticz/GitHarbor/wiki/Container-Packages)
 - [Operations](https://github.com/xChaooticz/GitHarbor/wiki/Operations)
 - [Troubleshooting](https://github.com/xChaooticz/GitHarbor/wiki/Troubleshooting)

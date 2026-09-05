@@ -36,6 +36,9 @@ def test_rejects_invalid_interval(value: str | int) -> None:
 def test_settings_validate_and_hide_tokens(tmp_path: Path) -> None:
     settings = Settings(**settings_values(tmp_path), sync_interval="45m")  # type: ignore[arg-type]
     assert settings.sync_interval == 2700
+    assert settings.sync_concurrency == 3
+    assert settings.git_cache_retention_days == 30
+    assert settings.external_sources_file is None
     assert settings.wiki_enabled is True
     assert settings.releases_enabled is True
     assert settings.release_assets_enabled is True
@@ -44,6 +47,19 @@ def test_settings_validate_and_hide_tokens(tmp_path: Path) -> None:
     assert settings.container_image_mode is ContainerImageMode.ALL
     assert settings.database_url.endswith("state.db")
     assert "github-secret" not in repr(settings)
+
+
+def test_external_sources_file_accepts_path_and_blank(tmp_path: Path) -> None:
+    path = tmp_path / "sources.toml"
+    configured = Settings(  # type: ignore[arg-type]
+        **settings_values(tmp_path), external_sources_file=path
+    )
+    disabled = Settings(  # type: ignore[arg-type]
+        **settings_values(tmp_path), external_sources_file=""
+    )
+
+    assert configured.external_sources_file == path
+    assert disabled.external_sources_file is None
 
 
 def test_settings_accept_feature_flags_and_latest_asset_mode(tmp_path: Path) -> None:
@@ -111,3 +127,17 @@ def test_rejects_unsafe_namespace(tmp_path: Path) -> None:
     values["gitea_owned_namespace"] = "../../bad"
     with pytest.raises(ValidationError):
         Settings(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [0, 33])
+def test_rejects_unsafe_sync_concurrency(tmp_path: Path, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**settings_values(tmp_path), sync_concurrency=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [-1, 3651])
+def test_rejects_unsafe_cache_retention(tmp_path: Path, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(  # type: ignore[arg-type]
+            **settings_values(tmp_path), git_cache_retention_days=value
+        )

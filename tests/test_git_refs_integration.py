@@ -46,13 +46,22 @@ async def test_github_pull_refs_are_preserved_outside_giteas_reserved_namespace(
     pull_commit = run_git("rev-parse", "HEAD", cwd=source_work)
     run_git("push", "origin", "HEAD:refs/pull/10/head", cwd=source_work)
 
-    await GitMirror(timeout_seconds=60, lfs_enabled=False).mirror(
+    mirror = GitMirror(
+        timeout_seconds=60,
+        lfs_enabled=False,
+        cache_path=tmp_path / "git-mirror-cache",
+    )
+    await mirror.mirror(
         source_url=str(source_bare),
         source_token="",
         destination_url=str(destination_bare),
         destination_token="",
         destination_username="",
+        cache_key="owned-123",
     )
+
+    cached_mirror = mirror._cached_mirror_path("owned-123", "repository.git")
+    assert cached_mirror is not None and cached_mirror.is_dir()
 
     assert (
         run_git("rev-parse", "refs/githarbor/github-pull/10/head", cwd=destination_bare)
@@ -67,12 +76,13 @@ async def test_github_pull_refs_are_preserved_outside_giteas_reserved_namespace(
     assert result.returncode != 0
 
     run_git("update-ref", "-d", "refs/pull/10/head", cwd=source_bare)
-    await GitMirror(timeout_seconds=60, lfs_enabled=False).mirror(
+    await mirror.mirror(
         source_url=str(source_bare),
         source_token="",
         destination_url=str(destination_bare),
         destination_token="",
         destination_username="",
+        cache_key="owned-123",
     )
 
     result = subprocess.run(
@@ -82,3 +92,16 @@ async def test_github_pull_refs_are_preserved_outside_giteas_reserved_namespace(
         check=False,
     )
     assert result.returncode != 0
+
+    shutil.rmtree(cached_mirror)
+    cached_mirror.mkdir()
+    (cached_mirror / "invalid-cache-entry").write_text("not a Git repository\n")
+    await mirror.mirror(
+        source_url=str(source_bare),
+        source_token="",
+        destination_url=str(destination_bare),
+        destination_token="",
+        destination_username="",
+        cache_key="owned-123",
+    )
+    assert run_git("rev-parse", "--is-bare-repository", cwd=cached_mirror) == "true"

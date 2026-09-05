@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from githarbor.clients.github import UpstreamRepository
 from githarbor.database import Database
+from githarbor.external_sources import ExternalRepository
 from githarbor.models import Base, Repository, RepositoryKind, RepositoryStatus
 from githarbor.services.reconciliation import Reconciler
 
@@ -103,3 +104,44 @@ def test_starred_name_uses_id_suffix_only_for_a_collision(
             "octo-user--project",
             "octo-user--project--gh456",
         ]
+
+
+def test_external_reconciliation_uses_provider_and_file_id(now: datetime) -> None:
+    database = memory_database()
+    upstream = ExternalRepository(
+        source_provider="forgejo",
+        source_id="eden-server",
+        owner="eden",
+        name="server",
+        full_name="eden/server",
+        html_url="https://git.eden-emu.dev/eden/server",
+        clone_url="https://git.eden-emu.dev/eden/server.git",
+        description=None,
+        default_branch="main",
+        private=False,
+        archived=False,
+        fork=False,
+        wiki_clone_url="https://git.eden-emu.dev/eden/server.wiki.git",
+        destination_namespace="external",
+        destination_name="eden-server",
+        token_env=None,
+        source_username="git",
+        api_base="https://git.eden-emu.dev/api/v1",
+        releases_enabled=True,
+        release_assets_enabled=True,
+    )
+    reconciler = Reconciler()
+
+    with database.session_factory() as session:
+        first = reconciler.reconcile_external(session, [upstream], now)
+        second = reconciler.reconcile_external(session, [upstream], now)
+        assert first == second
+        repository = session.get(Repository, first[0])
+        assert repository is not None
+        assert repository.github_id is None
+        assert repository.source_provider == "forgejo"
+        assert repository.source_id == "eden-server"
+        assert repository.wiki_clone_url == upstream.wiki_clone_url
+
+        reconciler.reconcile_external(session, [], now)
+        assert repository.status == RepositoryStatus.UNAVAILABLE.value

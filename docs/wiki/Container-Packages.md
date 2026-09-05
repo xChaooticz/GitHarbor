@@ -9,7 +9,8 @@ Container Registry requires a classic PAT for authenticated pulls.
 GitHarbor mirrors only packages that GitHub reports as explicitly linked to a repository owned by
 `GITHUB_USERNAME`. A package without a repository link is skipped. Packages belonging only to
 starred repositories are not downloaded; support may arrive in a future release as a separate
-opt-in policy.
+opt-in policy. Forgejo and GitLab entries in the external-sources file do not trigger container
+package discovery or transfer.
 
 For a source package named `project/image`, the default mapping is:
 

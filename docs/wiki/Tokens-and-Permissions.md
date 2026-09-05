@@ -1,10 +1,10 @@
 # Tokens and permissions
 
-GitHarbor uses one token per provider. `GITHUB_TOKEN` is the only GitHub credential and remains
-read-only from GitHarbor's perspective. The Gitea token must create and update destinations, so it
-intentionally has write access within the destination account.
+GitHarbor uses one `GITHUB_TOKEN` for GitHub reads and one `GITEA_TOKEN` for destination writes.
+Private external Forgejo or GitLab entries can name an additional read-only source token through
+`token_env`. Public external repositories normally need no token.
 
-Treat both tokens as passwords. Never paste them into an issue, commit, screenshot, container image,
+Treat every token as a password. Never paste one into an issue, commit, screenshot, container image,
 or shell command that will remain in history.
 
 ## GitHub classic PAT
@@ -53,6 +53,34 @@ Set `GITHUB_API_URL` to the enterprise REST API root, commonly
 use that server's matching GitHub documentation. The token still needs API discovery plus HTTPS Git
 and LFS read access, plus authenticated package reads when package mirroring is enabled.
 
+## External Forgejo and GitLab tokens
+
+An external entry needs a token only when anonymous access cannot read all configured layers. Give
+that token enough permission to read repository metadata and enabled releases through the provider
+API, and to clone the primary Git, LFS, and explicitly configured wiki repositories over HTTPS.
+
+For GitLab, a personal access token commonly needs `read_api` and `read_repository`. See GitLab's
+[personal access token scopes](https://docs.gitlab.com/user/profile/personal_access_tokens/#personal-access-token-scopes).
+Forgejo permission names depend on the installed version; grant only repository and API read access
+needed by the source account. A source token never needs write permission because GitHarbor does not
+modify the external server.
+
+Reference the token by environment-variable name in `external-sources.toml`:
+
+```toml
+[[repositories]]
+provider = "gitlab"
+clone_url = "https://gitlab.example.com/team/project.git"
+destination_namespace = "external-backups"
+token_env = "PROJECT_GITLAB_TOKEN"
+```
+
+Store the actual value in `.env`; the supplied Compose service loads that file through `env_file`.
+Do not put the value in TOML or embed it in a URL. GitLab uses Git username `oauth2` by default and
+Forgejo uses `git`; set `git_username` only when the instance requires something different. See
+[External sources](https://github.com/xChaooticz/GitHarbor/wiki/External-Sources) for the complete
+private-source configuration.
+
 ## Docker login for a private deployment image
 
 Docker must authenticate before it can pull a private GitHarbor image, before the application can
@@ -70,7 +98,8 @@ GitHub repository visibility and container-package visibility can be configured 
 ## Gitea token
 
 Use a dedicated Gitea account so the token cannot modify unrelated repositories. Add that account
-as an owner of the two GitHarbor organizations before creating the token.
+as an owner of the two GitHub destination organizations and every optional external destination
+organization before creating the token.
 
 Gitea's official [API usage guide](https://docs.gitea.com/1.26/development/api-usage/) documents the
 token screen, one-time token display, and granular scopes.
@@ -95,7 +124,7 @@ These permissions cover exactly what the organization configuration uses:
 | Permission | GitHarbor use |
 |---|---|
 | `read:user` | Verify the token account through `/api/v1/user` |
-| `write:organization` | Inspect the organizations and create repositories inside them |
+| `write:organization` | Inspect destination organizations and create repositories inside them |
 | `write:repository` | Push Git/LFS data and create releases and release attachments |
 | `write:package` | Push, link, inspect, and safely remove managed container versions when enabled |
 
@@ -105,7 +134,7 @@ each organization.
 
 ### Personal-user destination
 
-GitHarbor also accepts the authenticated Gitea username as a namespace. If either destination uses
+GitHarbor also accepts the authenticated Gitea username as a namespace. If any destination uses
 that personal namespace, grant **user: Read and Write** (`write:user`) instead of `read:user`, plus
 `write:repository` and, when package mirroring is enabled, `write:package`. Repository creation
 under `/api/v1/user/repos` is a user write operation.
@@ -118,7 +147,8 @@ practical rather than giving a daily-use administrator account to GitHarbor.
 
 ## Store and rotate tokens
 
-- Put token values only in the untracked `.env` file or an equivalent container secret mechanism.
+- Put token values only in the untracked `.env` file or an equivalent container secret mechanism;
+  external TOML files contain environment-variable names, never values.
 - Restrict access to the deployment directory and Docker daemon.
 - Use expiration dates and record a rotation reminder.
 - Revoke a token immediately if it appears in Git history, logs, chat, or an issue.

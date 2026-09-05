@@ -7,6 +7,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-05
+
+### Added
+
+- A versioned TOML external-source inventory can mirror explicit Forgejo and GitLab HTTPS
+  repositories, reachable LFS objects, and explicitly configured wiki Git repositories into Gitea.
+- External repository IDs, names, descriptions, and default branches are resolved from provider
+  APIs; automatic IDs are namespaced by source instance, and omitted wiki URLs are skipped without
+  probing.
+- External native release metadata is reconciled through provider APIs; Forgejo attachments with
+  declared sizes are copied, while unsafe or size-unknown asset links are skipped with warnings.
+- External credentials are referenced by environment-variable name rather than stored in the
+  inventory, database, Git configuration, or logs.
+
+### Changed
+
+- Git and LFS synchronization now retains persistent bare mirrors and fetches only upstream changes
+  on later runs instead of downloading every repository from scratch.
+- Global synchronization processes a configurable number of repositories concurrently, and invalid
+  or corrupt persistent mirrors are rebuilt automatically.
+- Cache maintenance runs Git's automatic garbage collection and removes cache entries that remain
+  absent from successful discovery beyond the configured retention period.
+- Release reconciliation avoids unchanged release updates and reuses attachment data already
+  returned by Gitea instead of issuing redundant per-release asset-list requests.
+
+### Fixed
+
+- Explicit external identity overrides remain usable when a compatible provider metadata response
+  omits its numeric repository ID.
+
+### Security
+
+- Authenticated external wiki URLs must use the same HTTPS origin as their repository clone URL,
+  preventing a configured source token from being forwarded to another host.
+
 ## [0.6.6] - 2026-09-04
 
 ### Fixed
@@ -230,7 +265,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.3...v0.6.4

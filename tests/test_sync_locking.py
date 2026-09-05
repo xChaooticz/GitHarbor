@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 
 from githarbor.clients.gitea import DestinationRepository
 from githarbor.clients.github import UpstreamRepository
 from githarbor.config import Settings
 from githarbor.database import Database
-from githarbor.models import Base, Repository, RepositoryStatus, RunStatus
+from githarbor.models import Base, Repository, RepositoryStatus, RunStatus, SyncRun
 from githarbor.services.sync import SyncService
 
 
@@ -34,10 +36,27 @@ class PartiallyFailingGitHub:
         return []
 
 
+class DiscoveringGitHub(FakeGitHub):
+    def __init__(self, repositories: list[UpstreamRepository]) -> None:
+        super().__init__(repositories[0])
+        self.repositories = repositories
+
+    async def list_owned(self) -> list[UpstreamRepository]:
+        return self.repositories
+
+    async def list_starred(self) -> list[UpstreamRepository]:
+        return []
+
+
 class FakeGitea:
-    async def ensure_repository(self, **_kwargs: Any) -> DestinationRepository:
+    async def ensure_repository(self, **kwargs: Any) -> DestinationRepository:
+        namespace = str(kwargs["namespace"])
+        name = str(kwargs["name"])
         return DestinationRepository(
-            "archive", "repo", "https://gitea.test/repo.git", "https://gitea.test/repo"
+            namespace,
+            name,
+            f"https://gitea.test/{namespace}/{name}.git",
+            f"https://gitea.test/{namespace}/{name}",
         )
 
     async def authenticated_user(self) -> dict[str, str]:
@@ -63,6 +82,38 @@ class BlockingGit:
         self.calls += 1
         self.started.set()
         await self.release.wait()
+
+    async def maintain_cache(
+        self, _active_entries: set[tuple[str, str]], _retention_days: int
+    ) -> None:
+        return None
+
+
+class ConcurrencyRecordingGit:
+    def __init__(self, expected_concurrency: int) -> None:
+        self.expected_concurrency = expected_concurrency
+        self.active = 0
+        self.maximum_active = 0
+        self.calls = 0
+        self.release = asyncio.Event()
+        self.maintenance_calls: list[tuple[set[tuple[str, str]], int]] = []
+
+    async def mirror(self, **_kwargs: Any) -> None:
+        self.calls += 1
+        self.active += 1
+        self.maximum_active = max(self.maximum_active, self.active)
+        if self.active == self.expected_concurrency:
+            self.release.set()
+        try:
+            await asyncio.wait_for(self.release.wait(), timeout=2)
+            await asyncio.sleep(0)
+        finally:
+            self.active -= 1
+
+    async def maintain_cache(
+        self, active_entries: set[tuple[str, str]], retention_days: int
+    ) -> None:
+        self.maintenance_calls.append((active_entries, retention_days))
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -115,6 +166,7 @@ async def test_per_repository_sync_is_locked(tmp_path: Path, upstream: UpstreamR
     assert service.status()["counts"] == {
         "owned": 0,
         "starred": 1,
+        "external": 0,
         "active": 0,
         "syncing": 1,
         "unavailable": 0,
@@ -216,3 +268,48 @@ async def test_failed_discovery_does_not_mark_known_repository_missing(
         preserved = session.get(Repository, repository_id)
         assert preserved is not None
         assert preserved.status == RepositoryStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_global_sync_honors_repository_concurrency_limit(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    repositories = [
+        replace(
+            upstream,
+            github_id=upstream.github_id + index,
+            node_id=f"R_{upstream.github_id + index}",
+            name=f"project-{index}",
+            full_name=f"octo-user/project-{index}",
+            html_url=f"https://github.example/octo-user/project-{index}",
+            clone_url=f"https://github.example/octo-user/project-{index}.git",
+        )
+        for index in range(4)
+    ]
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    git = ConcurrencyRecordingGit(expected_concurrency=3)
+    service = SyncService(
+        make_settings(tmp_path),
+        database,
+        DiscoveringGitHub(repositories),  # type: ignore[arg-type]
+        FakeGitea(),
+        git,  # type: ignore[arg-type]
+    )
+
+    await service.sync_all("test")
+
+    assert git.calls == 4
+    assert git.maximum_active == 3
+    assert git.maintenance_calls == [
+        (
+            {(f"owned-{repository.github_id}", "repository.git") for repository in repositories},
+            30,
+        )
+    ]
+    with database.session_factory() as session:
+        run = session.scalar(select(SyncRun).where(SyncRun.repository_id.is_(None)))
+        assert run is not None
+        assert run.status == RunStatus.SUCCESS.value
+        assert run.succeeded == 4
+        assert run.failed == 0

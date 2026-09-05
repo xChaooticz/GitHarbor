@@ -1,7 +1,8 @@
 # Getting started
 
 This guide takes a new installation from an empty directory to its first verified mirror. The
-recommended layout uses two Gitea organizations and one dedicated Gitea service account.
+recommended base layout uses two Gitea organizations and one dedicated Gitea service account. Add a
+third organization when you also want to preserve selected Forgejo or GitLab repositories.
 
 ## 1. Prerequisites
 
@@ -9,8 +10,9 @@ You need:
 
 - A machine with Docker and the Docker Compose v2 plugin (`docker compose version`)
 - A GitHub account whose personal repositories and stars should be preserved
+- Optional Forgejo or GitLab repository URLs, plus read-only credentials when they are private
 - A running Gitea instance that the GitHarbor container can reach over HTTP or HTTPS
-- Enough storage in Gitea for every repository, reachable Git LFS object, and release asset
+- Enough storage for Gitea and GitHarbor's persistent bare-mirror cache
 
 Use a supported Docker installation from the
 [official Docker documentation](https://docs.docker.com/engine/install/). GitHarbor builds Git and
@@ -37,7 +39,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.6.6
+git checkout v0.7.0
 ```
 
 ## 3. Prepare Gitea
@@ -48,8 +50,12 @@ organizations:
 - `github-backups` for repositories owned by the GitHub account
 - `github-archive` for repositories starred by the GitHub account
 
-The account that owns the Gitea token must be an owner of both organizations, or otherwise be able
-to create repositories and push to them. Follow the detailed
+If you will configure external repositories, also create an organization such as
+`external-backups`. It is optional: each external entry can target any organization writable by the
+Gitea token, or the token user's personal namespace.
+
+The account that owns the Gitea token must be able to create repositories and push in every selected
+destination organization. Follow the detailed
 [Gitea organizations guide](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Organizations).
 
 If any source uses Git LFS, enable Gitea's LFS server before the first synchronization. The official
@@ -69,6 +75,7 @@ Create:
 - One classic GitHub PAT that GitHarbor uses only for discovery, cloning, releases, LFS, and
   container-package reads
 - A Gitea token that can create repositories, push Git/LFS data, and write releases and attachments
+- Optional read-only Forgejo or GitLab tokens for private external sources
 
 Grant the classic PAT `repo` for private repository data and `read:packages` for container images.
 These two scopes provide one consistent setup whether optional package mirroring is enabled now or
@@ -108,6 +115,7 @@ GITEA_STARRED_NAMESPACE=github-archive
 
 SYNC_INTERVAL=6h
 SYNC_ON_STARTUP=true
+SYNC_CONCURRENCY=3
 DATABASE_PATH=/data/githarbor.db
 DESTINATION_PRIVATE=true
 API_TIMEOUT_SECONDS=30
@@ -123,6 +131,11 @@ PACKAGE_MAX_BYTES=0
 PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
 GIT_TIMEOUT_SECONDS=3600
+GIT_CACHE_PATH=/data/git-mirrors
+GIT_CACHE_RETENTION_DAYS=30
+EXTERNAL_SOURCES_FILE=
+ADMIN_ACTIONS_ENABLED=false
+ADMIN_ACTIONS_TOKEN=
 LOG_LEVEL=INFO
 ```
 
@@ -131,11 +144,41 @@ Rules that prevent common startup failures:
 - `GITHUB_USERNAME` must exactly identify the account that created `GITHUB_TOKEN`.
 - `GITEA_URL` is the Gitea root URL, without `/api/v1` and without a repository path.
 - Namespace values are Gitea usernames or organization names, not complete URLs.
+- `SYNC_CONCURRENCY` is the global repository worker limit; start with `3` and tune it to the host
+  and provider limits.
+- `GIT_CACHE_PATH` must be persistent. The supplied Compose file stores it in `githarbor-data`.
 - Keep `.env` private. It is ignored by Git, but it is still a plaintext secret file on the host.
 
 See [Configuration](https://github.com/xChaooticz/GitHarbor/wiki/Configuration) for every setting.
 
-## 6. Pull and start
+## 6. Optional: add Forgejo or GitLab sources
+
+Skip this section when GitHub is your only source. Otherwise copy the example inventory:
+
+```sh
+cp external-sources.example.toml external-sources.toml
+```
+
+Add one `[[repositories]]` table per repository. This example lets the source API determine the ID,
+name, description, and default branch, and mirrors the wiki because its URL is explicitly supplied:
+
+```toml
+version = 1
+
+[[repositories]]
+provider = "forgejo"
+clone_url = "https://git.eden-emu.dev/eden-emu/eden.git"
+wiki_url = "https://git.eden-emu.dev/eden-emu/eden.wiki.git"
+destination_namespace = "external-backups"
+```
+
+Set `EXTERNAL_SOURCES_FILE=/config/external-sources.toml` in `.env` and uncomment the corresponding
+read-only mount in `docker-compose.yml`. For a private source, configure `token_env` in TOML and add
+that named variable to `.env`; never put a token in a URL or the TOML file. See
+[External sources](https://github.com/xChaooticz/GitHarbor/wiki/External-Sources) for every field,
+private-token setup, release behavior, and limitations.
+
+## 7. Pull and start
 
 ```sh
 docker compose up -d
@@ -150,7 +193,7 @@ source instead, add `--build`:
 docker compose up -d --build
 ```
 
-For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.6.6`.
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.7.0`.
 If the GitHarbor GHCR package is private, authenticate the Docker host before running Compose:
 
 ```sh
@@ -164,13 +207,16 @@ the same operating-system user. A private repository and a private package are n
 same thing; GitHub package visibility may be configured independently.
 
 Press `Ctrl+C` to stop following logs; the container continues running. With
-`SYNC_ON_STARTUP=true`, the first discovery starts after application startup. Large accounts and LFS
-repositories may take time because each repository is mirrored independently.
+`SYNC_ON_STARTUP=true`, the first discovery starts after application startup. The first run creates
+a complete bare cache for every repository and can therefore take time and bandwidth. Later runs
+reuse those caches, fetch only changes, and push the resulting refs to Gitea. Up to
+`SYNC_CONCURRENCY` repositories are processed at once.
 
-## 7. Verify the installation
+## 8. Verify the installation
 
 Open `http://DOCKER_HOST_IP:9005` from the Docker host or another device on the same private network.
 You should see GitHub and Gitea connection status, repository counts, and synchronization results.
+External sources appear in the inventory rather than as another global connection tile.
 
 You can also check the health endpoint:
 
@@ -189,11 +235,13 @@ Then verify in Gitea:
 5. A GitHub release appears under Gitea **Releases**, with its transferable assets downloadable.
 6. If packages are enabled, a container linked to an owned repository appears under the configured
    owned namespace and can be pulled from the Gitea registry.
+7. If external sources are configured, each appears in its selected namespace. Only entries with a
+   populated explicit `wiki_url` get a wiki, and supported native releases appear in Gitea.
 
 The dashboard's manual **Sync all repositories** action is useful after correcting a token or
 network issue. It is safe to retry; overlapping global runs are rejected.
 
-## 8. Secure and operate it
+## 9. Secure and operate it
 
 Compose binds the dashboard to `0.0.0.0:9005`, making it available on the private LAN. GitHarbor has
 no built-in authentication, so anyone who can reach the dashboard can view its operational metadata

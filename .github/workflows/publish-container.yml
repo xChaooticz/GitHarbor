@@ -9,7 +9,7 @@ on:
         description: Git tag or commit to build
         required: true
       version_tag:
-        description: Container version tag, for example v0.5.1
+        description: Container version tag, for example v1.0.0
         required: true
 
 permissions:

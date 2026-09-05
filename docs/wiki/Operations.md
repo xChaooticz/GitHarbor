@@ -16,8 +16,8 @@ run history. It checks the status API every 10 seconds and refreshes itself whil
 running, then once more when it completes. **Syncing** is the number of in-flight transfers and
 falls as they finish; **Mirrored** is the number of successfully preserved repositories. Investigate
 repositories in `error`; `unavailable` and `unstarred` are preservation states and do not mean that
-the Gitea copy was deleted. A `partial` run with **Last warning** means the core mirror succeeded
-but one or more release assets were safely skipped.
+the Gitea copy was deleted. A `partial` run with **Last warning** means the core mirror succeeded but
+an optional release, release asset, or package operation was safely skipped.
 
 Logs are structured JSON and redact known token patterns. Still protect logs as operational data:
 repository names and failure details may be sensitive.
@@ -27,6 +27,11 @@ logs discovery, destination preparation, Git, default-branch, wiki, release, and
 along with every repository's completion and the global result. Warnings and errors remain visible
 at this level. A quiet log after startup means no synchronization is currently running; use **Sync
 now** or wait for the configured schedule.
+
+A global run processes up to `SYNC_CONCURRENCY` repositories at once. The first run creates complete
+bare mirrors under `GIT_CACHE_PATH`; subsequent runs normally use incremental fetches and transfer
+only changed Git objects. A cache-validation warning followed by a rebuild is automatic recovery,
+not a reason to delete the Gitea destination.
 
 ## Manual synchronization
 
@@ -57,14 +62,19 @@ confirm the Gitea deletion has completed, then run a global sync to recreate the
 dedicated GitHarbor organizations and take a Gitea backup first. The Gitea token stays server-side;
 the browser must supply the separate admin-action token and exact confirmation text.
 
+Only `GITEA_OWNED_NAMESPACE` and `GITEA_STARRED_NAMESPACE` are offered by this control. A namespace
+used only by external TOML entries is not included.
+
 ## Backups
 
-There are two independent things to protect:
+Protect these independent parts:
 
 1. **Gitea** contains the preserved Git repositories and Git LFS objects. This is the essential
    backup target.
 2. **GitHarbor's `githarbor-data` volume** contains SQLite inventory, destination mappings, status,
-   and run history.
+   run history, and the default persistent Git cache at `/data/git-mirrors`.
+3. **Deployment configuration** includes `.env`, `docker-compose.yml`, and an optional external
+   sources file. Store secret backups securely.
 
 Follow Gitea's official
 [Backup and Restore guide](https://docs.gitea.com/1.26/administration/backup-and-restore/) and include
@@ -93,6 +103,10 @@ Docker's [volume backup documentation](https://docs.docker.com/engine/storage/vo
 explains the same `--volumes-from` pattern. Store archives away from the Docker host and test a
 restore periodically.
 
+The Git cache is recoverable from the source providers and is not the authoritative backup, but
+including it avoids a full re-download after restore. Its size can approach the packed Git and LFS
+size of all cached sources, in addition to the repository storage already held by Gitea.
+
 The database can be recreated by rediscovery if it is lost, but existing Gitea destinations will
 then lack trusted local mappings and may be rejected by the marker safety check. Preserve the volume
 rather than relying on reconstruction.
@@ -114,7 +128,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.6.6
+git checkout v0.7.0
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave
@@ -135,7 +149,8 @@ docker compose up -d --build --no-deps --wait --wait-timeout 180 githarbor
 ```
 
 The volume remains attached when Compose replaces the container. GitHarbor applies Alembic database
-migrations automatically at startup. Do not downgrade across a database migration unless the
+migrations automatically at startup, including migration of existing GitHub rows to provider-aware
+identity before external sources are used. Do not downgrade across a database migration unless the
 release notes explicitly document a safe downgrade path.
 
 ## Verify a NAS installation
@@ -175,7 +190,7 @@ GitHarbor's CI performs the same Compose startup and health test on an isolated 
    docker compose logs --tail 100 githarbor
    ```
 
-5. Trigger a sync and confirm both provider connections.
+5. Trigger a sync, confirm GitHub and Gitea connections, and verify any authenticated external entry.
 6. Revoke the old token.
 
 ## Verify Git LFS preservation
@@ -194,41 +209,62 @@ reachable from all mirrored refs, not only the default branch.
 
 ## Verify wiki preservation
 
-For a GitHub repository with at least one wiki page, open the **Wiki** tab on its managed Gitea
-destination. The page content and revision history should be present. You can also verify the Git
-history directly:
+For a GitHub repository with at least one wiki page, or an external repository with a populated
+explicit `wiki_url`, open the **Wiki** tab on its managed Gitea destination. The page content and
+revision history should be present. You can also verify the Git history directly:
 
 ```sh
 git clone https://gitea.example.com/github-backups/example.wiki.git wiki-restore-test
 git -C wiki-restore-test log --oneline --all
 ```
 
-Repositories with the GitHub wiki feature disabled, or enabled without any pages, are intentionally
-skipped. A populated wiki that cannot be cloned or pushed leaves the primary repository preserved,
-marks the repository and run `error`, and records the failure for later retry.
+GitHub repositories with the wiki feature disabled or without pages are intentionally skipped.
+External entries without `wiki_url` are skipped without a network probe. A populated configured
+wiki that cannot be cloned or pushed leaves the primary repository preserved, marks the repository
+and run `error`, and records the failure for later retry.
 
 ## Verify release preservation
 
 Open the **Releases** page of a managed Gitea repository and compare its tag, title, body,
-draft/prerelease state, and downloadable assets with GitHub. GitHarbor processes assets one at a
-time and validates their byte count; when GitHub supplies a SHA-256 digest, it validates that too.
+draft/prerelease state, and downloadable assets with the source provider. GitHarbor processes assets
+one at a time and validates their byte count; when the source supplies a SHA-256 digest, it validates
+that too. Unchanged releases are not patched again on later runs.
 
 If an asset cannot be transferred, the repository remains `active`, its run is `partial`, and the
 repository detail page shows **Last warning**. Correct the Gitea attachment setting, reverse-proxy
 body-size limit, storage capacity, permissions, or timeout, then retry the repository. Later syncs
 retry skipped assets automatically.
 
-With `RELEASE_ASSET_MODE=latest`, verify that only GitHub's latest published stable release has
-managed attachments. When a newer stable release becomes latest, its assets are uploaded and the
-previous latest release's safely identified managed assets are removed. Draft and prerelease
+With `RELEASE_ASSET_MODE=latest`, verify that only the source provider's latest published stable
+release has managed attachments. When a newer stable release becomes latest, its assets are
+uploaded and the previous latest release's safely identified managed assets are removed. Draft and prerelease
 metadata is still mirrored, but their assets are not retained in this mode. If the new latest asset
 set is incomplete or fails, the older managed assets remain as a fallback until a retry succeeds.
+
+Forgejo attachments require a declared byte size and safe same-origin URL. GitLab release links
+without a trustworthy size are intentionally skipped and shown in **Last warning**; set
+`release_assets = false` for that entry if this limitation is expected.
+
+## Cache maintenance and recovery
+
+GitHarbor validates each cached bare mirror before reuse. If validation or an incremental fetch
+shows that an entry is invalid, GitHarbor builds a replacement and swaps it into place, leaving the
+Gitea destination untouched. Active entries receive `git gc --auto` after synchronization.
+
+Repositories absent from a complete successful discovery retain their caches for
+`GIT_CACHE_RETENTION_DAYS`; `0` removes them immediately. Provider discovery failures and an invalid
+external-sources file do not trigger expiry decisions for the affected set.
+
+To recover the cache manually, first stop GitHarbor so no worker is using it, then move the cache
+root aside. After starting GitHarbor, retry synchronization; every missing source mirror will be
+downloaded again. Never remove Gitea repository storage as a substitute for cache cleanup.
 
 ## Disaster recovery order
 
 1. Restore Gitea, including its database, repositories, configuration, and LFS storage.
 2. Restore the GitHarbor data volume to `/data` with UID `10001` able to read and write it.
-3. Restore `.env` from a secure secret backup, or create replacement tokens.
+3. Restore `.env`, `docker-compose.yml`, and the optional external-sources file from secure backups,
+   or create replacement tokens.
 4. Start GitHarbor and inspect startup migrations and connection checks.
 5. Trigger a global sync.
 6. Clone a normal repository and an LFS repository from Gitea to validate real recovery.
