@@ -20,6 +20,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Wiki commits.
 - Dependabot version updates now cover Python dependencies in addition to pinned GitHub Actions.
 
+### Fixed
+
+- Release creation retries Gitea's transient `repo is empty` response while a freshly mirrored
+  repository is still being indexed.
+
 ### Security
 
 - Dependabot vulnerability alerts and automatic security fixes are enabled for the GitHub

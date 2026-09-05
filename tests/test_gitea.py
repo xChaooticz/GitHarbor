@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -160,7 +161,11 @@ async def test_set_default_branch_updates_repository() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gitea_validation_errors_include_the_safe_api_message() -> None:
+async def test_gitea_validation_errors_include_the_safe_api_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("githarbor.clients.gitea.asyncio.sleep", sleep)
     client = GiteaClient("https://gitea.test", "secret")
     await client._client.aclose()
     client._client = httpx.AsyncClient(
@@ -172,6 +177,36 @@ async def test_gitea_validation_errors_include_the_safe_api_message() -> None:
 
     with pytest.raises(GiteaError, match="HTTP 422: repo is empty"):
         await client.create_release("archive", "project", {"tag_name": "v1.0"})
+    assert sleep.await_count == 4
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_release_creation_retries_while_gitea_indexes_a_fresh_push(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(422, json={"message": "repo is empty"})
+        return httpx.Response(201, json={"id": 7, "tag_name": "v1.0"})
+
+    sleep = AsyncMock()
+    monkeypatch.setattr("githarbor.clients.gitea.asyncio.sleep", sleep)
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+
+    release = await client.create_release("archive", "project", {"tag_name": "v1.0"})
+
+    assert release.gitea_id == 7
+    assert attempts == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [1, 2]
     await client.close()
 
 

@@ -29,6 +29,7 @@ class GiteaAssetUploadError(GiteaError):
 
 
 _MAX_REPOSITORY_DESCRIPTION = 2048
+_RELEASE_CREATION_ATTEMPTS = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,7 +277,17 @@ class GiteaClient:
     async def create_release(
         self, namespace: str, name: str, payload: dict[str, Any]
     ) -> GiteaRelease:
-        data = await self._request("POST", f"repos/{namespace}/{name}/releases", json=payload)
+        for attempt in range(_RELEASE_CREATION_ATTEMPTS):
+            try:
+                data = await self._request(
+                    "POST", f"repos/{namespace}/{name}/releases", json=payload
+                )
+                break
+            except GiteaError as exc:
+                repository_not_ready = "HTTP 422: repo is empty" in str(exc)
+                if not repository_not_ready or attempt == _RELEASE_CREATION_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(2**attempt)
         if not isinstance(data, dict):
             raise GiteaError("Gitea returned an invalid release creation response")
         return GiteaRelease.from_gitea(data)
