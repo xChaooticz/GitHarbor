@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     package_max_bytes: int = Field(default=0, ge=0)
     package_transfer_timeout_seconds: int = Field(default=3600, ge=30)
     git_lfs_enabled: bool = True
+    git_pull_refs_enabled: bool = False
     git_timeout_seconds: int = Field(default=3600, ge=30)
     git_cache_path: Path = Path("/data/git-mirrors")
     git_cache_retention_days: int = Field(default=30, ge=0, le=3650)

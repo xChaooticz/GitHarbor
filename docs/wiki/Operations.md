@@ -24,14 +24,16 @@ repository names and failure details may be sensitive.
 
 At `LOG_LEVEL=INFO`, a normal startup emits a GitHarbor startup record. Every synchronization then
 logs discovery, destination preparation, Git, default-branch, wiki, release, and package stages,
-along with every repository's completion and the global result. Warnings and errors remain visible
-at this level. A quiet log after startup means no synchronization is currently running; use **Sync
-now** or wait for the configured schedule.
+along with every repository's completion and the global result. Git clone, fetch, LFS, ref
+preparation, destination push, and cache-GC records include their operation name, repository or
+cache entry, completion status, and duration. Warnings and errors remain visible at this level. A
+quiet log after startup means no synchronization is currently running; use **Sync now** or wait for
+the configured schedule.
 
-A global run processes up to `SYNC_CONCURRENCY` repositories at once. The first run creates complete
-bare mirrors under `GIT_CACHE_PATH`; subsequent runs normally use incremental fetches and transfer
-only changed Git objects. A cache-validation warning followed by a rebuild is automatic recovery,
-not a reason to delete the Gitea destination.
+A global run processes up to `SYNC_CONCURRENCY` repositories at once. The first run creates
+configured bare mirrors under `GIT_CACHE_PATH`; subsequent runs normally use incremental fetches
+and transfer only changed Git objects. A cache-validation warning followed by a rebuild is automatic
+recovery, not a reason to delete the Gitea destination.
 
 ## Manual synchronization
 
@@ -135,7 +137,7 @@ is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.7.1
+git checkout v0.7.2
 ```
 
 If `GITHARBOR_IMAGE_TAG` is pinned in `.env`, change it to the same new tag. If it is `latest`, leave

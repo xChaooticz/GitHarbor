@@ -7,7 +7,7 @@ an entire Forgejo or GitLab instance.
 
 For each entry, GitHarbor can preserve:
 
-- All Git refs and history, including branches, tags, notes, force-updates, and ref deletions
+- Ordinary Git refs and history, including branches, tags, notes, force-updates, and ref deletions
 - Git LFS objects reachable from those refs when LFS mirroring is enabled
 - The complete wiki Git repository when an explicit `wiki_url` is configured
 - Native release metadata, plus eligible release attachments
@@ -173,6 +173,9 @@ run clones the source into `GIT_CACHE_PATH`; later runs fetch only changed Git o
 refs, and push the resulting mirror to Gitea. The cache is an operational copy, while Gitea is the
 preserved destination, so storage exists in both places. You may delete the cache while GitHarbor is
 stopped to reclaim space, but the next run must download the full source history again.
+
+Provider-owned `refs/pull/*` refs follow the global `GIT_PULL_REFS_ENABLED` policy and are excluded
+by default. See [Configuration](Configuration#provider-owned-pull-refs).
 
 GitHarbor validates a cached mirror before use and rebuilds it automatically if it is invalid or
 corrupt. Active entries receive `git gc --auto`, and cache directories for sources absent from a

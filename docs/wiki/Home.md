@@ -49,10 +49,12 @@ digests or only the digest with the literal `latest` tag. Disabling an optional 
 Gitea data already mirrored by that layer.
 
 The first synchronization creates persistent bare-mirror caches and can take substantial time.
-Later runs validate each cache and fetch only changed Git objects before pushing changed refs to
-Gitea. Invalid caches are rebuilt automatically, active caches receive automatic Git maintenance,
-and stale caches expire after the configured retention period. A global run processes a configurable
-number of repositories concurrently.
+Provider-owned pull refs are excluded by default because large repositories can expose hundreds of
+thousands of them; see [Configuration](Configuration#provider-owned-pull-refs). Later runs validate
+each cache and fetch only changed Git objects before pushing changed refs to Gitea. Invalid caches
+are rebuilt automatically, active caches receive automatic Git maintenance, and stale caches expire
+after the configured retention period. A global run processes a configurable number of repositories
+concurrently.
 
 ## Important safety rules
 

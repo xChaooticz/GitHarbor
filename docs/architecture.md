@@ -36,15 +36,18 @@ Each source has a persistent bare mirror cache. The first synchronization clones
 only changed objects and prune deleted refs. Entries are validated before reuse, corrupt entries are
 rebuilt atomically, active entries receive automatic Git garbage collection, and repositories absent
 from successful discovery expire after the configured retention period. `--mirror` accurately
-synchronizes refs, including forced updates and deletion. GitHub's provider-owned `refs/pull/*`
-namespace is transactionally moved to
-`refs/githarbor/github-pull/*` in the cached mirror before the push because Gitea reserves its own
-pull-ref namespace. PR-only commits remain reachable without colliding with Gitea hooks. After the
-push, the Gitea API applies the source provider's current default branch. Tokens are supplied
-through a short-lived askpass environment and redacted from errors.
+synchronizes fetched refs, including forced updates and deletion. Provider-owned `refs/pull/*` refs
+are excluded by default because very large projects can expose hundreds of thousands of them. An
+explicit preservation mode fetches them and transactionally moves them to
+`refs/githarbor/github-pull/*`. Gerrit-style `refs/for/*` refs always move to
+`refs/githarbor/gerrit-for/*` because Gitea reserves both source namespaces for its own pull-request
+handling. After the push, the Gitea API applies the source provider's current default branch.
+Tokens are supplied through a short-lived askpass environment and redacted from errors. Git
+subprocesses run in isolated process groups so timeout and cancellation terminate their HTTP and
+pack helpers as well as the parent command.
 
 Git LFS is transferred before refs are published: the mirror fetches all LFS objects reachable from
-its complete ref namespace, uploads them to a named destination remote, then performs the mirror
+its configured ref namespace, uploads them to a named destination remote, then performs the mirror
 push with hooks disabled. A failed LFS step prevents the ref push. For HTTP remotes, command-local
 LFS URLs are derived from the trusted API clone URLs, preventing repository-controlled `.lfsconfig`
 from redirecting an askpass credential. Locks and unreachable server-side LFS objects are not part

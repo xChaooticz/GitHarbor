@@ -39,7 +39,7 @@ cd GitHarbor
 For a stable installation, check out the release you intend to run rather than an arbitrary commit:
 
 ```sh
-git checkout v0.7.1
+git checkout v0.7.2
 ```
 
 ## 3. Prepare Gitea
@@ -130,6 +130,7 @@ CONTAINER_IMAGE_MODE=all
 PACKAGE_MAX_BYTES=0
 PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
+GIT_PULL_REFS_ENABLED=false
 GIT_TIMEOUT_SECONDS=3600
 GIT_CACHE_PATH=/data/git-mirrors
 GIT_CACHE_RETENTION_DAYS=30
@@ -193,7 +194,7 @@ source instead, add `--build`:
 docker compose up -d --build
 ```
 
-For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.7.1`.
+For reproducible deployments, set `GITHARBOR_IMAGE_TAG` in `.env` to a release such as `v0.7.2`.
 If the GitHarbor GHCR package is private, authenticate the Docker host before running Compose:
 
 ```sh
@@ -208,8 +209,8 @@ same thing; GitHub package visibility may be configured independently.
 
 Press `Ctrl+C` to stop following logs; the container continues running. With
 `SYNC_ON_STARTUP=true`, the first discovery starts after application startup. The first run creates
-a complete bare cache for every repository and can therefore take time and bandwidth. Later runs
-reuse those caches, fetch only changes, and push the resulting refs to Gitea. Up to
+a bare cache of the configured refs for every repository and can therefore take time and bandwidth.
+Later runs reuse those caches, fetch only changes, and push the resulting refs to Gitea. Up to
 `SYNC_CONCURRENCY` repositories are processed at once.
 
 ## 8. Verify the installation

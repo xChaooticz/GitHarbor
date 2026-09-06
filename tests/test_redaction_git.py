@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -24,7 +25,6 @@ def test_git_command_construction_uses_argument_arrays() -> None:
     clone = GitMirror.clone_command("https://github.test/a/b.git", path)
     set_remote = GitMirror.set_remote_url_command(path, "https://github.test/a/b-renamed.git")
     fetch = GitMirror.fetch_command(path)
-    refspec_check = GitMirror.source_refspec_check_command(path)
     push = GitMirror.push_command(path, "https://gitea.test/archive/a--b.git")
     assert clone == ["git", "clone", "--mirror", "--", "https://github.test/a/b.git", str(path)]
     assert push == [
@@ -47,15 +47,17 @@ def test_git_command_construction_uses_argument_arrays() -> None:
         "https://github.test/a/b-renamed.git",
     ]
     assert fetch == ["git", "-C", str(path), "fetch", "--prune", "origin"]
-    assert refspec_check == [
+    assert GitMirror.replace_fetch_refspec_command(path) == [
         "git",
         "-C",
         str(path),
         "config",
-        "--get-all",
+        "--replace-all",
         "remote.origin.fetch",
+        "+refs/*:refs/*",
     ]
-    assert all("secret" not in part for part in clone + set_remote + fetch + refspec_check + push)
+    assert GitMirror.add_excluded_pull_refspec_command(path)[-1] == "^refs/pull/*"
+    assert all("secret" not in part for part in clone + set_remote + fetch + push)
 
 
 def test_wiki_push_keeps_the_destination_default_branch() -> None:
@@ -148,7 +150,11 @@ async def test_lfs_upload_failure_prevents_ref_publication(
         if "lfs" in command and "push" in command:
             raise GitError("LFS upload failed")
 
+    async def skip_ref_preparation(*_arguments: object) -> None:
+        return None
+
     monkeypatch.setattr(mirror, "_run", fail_lfs_upload)
+    monkeypatch.setattr(mirror, "_prepare_reserved_refs", skip_ref_preparation)
     with pytest.raises(GitError, match="LFS upload failed"):
         await mirror.mirror(
             "https://github.test/a/b.git",
@@ -164,7 +170,7 @@ async def test_lfs_upload_failure_prevents_ref_publication(
 
 @pytest.mark.asyncio
 async def test_lfs_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    mirror = GitMirror(lfs_enabled=False)
+    mirror = GitMirror(lfs_enabled=False, pull_refs_enabled=True)
     commands: list[Sequence[str]] = []
 
     async def record(command: Sequence[str], *_arguments: object, **_kwargs: object) -> None:
@@ -174,7 +180,7 @@ async def test_lfs_can_be_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -
         return None
 
     monkeypatch.setattr(mirror, "_run", record)
-    monkeypatch.setattr(mirror, "_remap_github_pull_refs", skip_ref_remap)
+    monkeypatch.setattr(mirror, "_prepare_reserved_refs", skip_ref_remap)
     await mirror.mirror(
         "https://github.test/a/b.git",
         "source-secret",
@@ -209,3 +215,30 @@ async def test_mirror_push_retries_a_transient_gateway_failure(
     await mirror._run(["git", "push"], tmp_path, {}, [], retry_transient=True)
 
     sleep.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "posix", reason="process-group termination requires POSIX")
+async def test_git_timeout_terminates_child_process_group(tmp_path: Path) -> None:
+    mirror = GitMirror(timeout_seconds=0.1)  # type: ignore[arg-type]
+    child_pid_path = tmp_path / "child.pid"
+
+    with pytest.raises(GitError, match="timed out after 0.1 seconds"):
+        await mirror._execute(
+            [
+                "sh",
+                "-c",
+                'sleep 60 & printf "%s" "$!" > "$1"; wait',
+                "githarbor-timeout-test",
+                str(child_pid_path),
+            ],
+            tmp_path,
+            os.environ,
+        )
+
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    try:
+        child_state = Path(f"/proc/{child_pid}/stat").read_text(encoding="utf-8").split()[2]
+    except FileNotFoundError:
+        child_state = None
+    assert child_state in {None, "Z"}
