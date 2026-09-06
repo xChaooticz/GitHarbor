@@ -417,6 +417,7 @@ class SyncService:
                     destination_token=self.settings.gitea_token.get_secret_value(),
                     destination_username=str(user["login"]),
                     cache_key=self._cache_key(upstream, kind),
+                    repository_label=full_name,
                 )
                 logger.info(
                     "Git refs mirrored: repository_id=%d upstream=%s", repository_id, full_name
@@ -460,6 +461,7 @@ class SyncService:
                             destination_token=self.settings.gitea_token.get_secret_value(),
                             destination_username=str(user["login"]),
                             cache_key=self._cache_key(upstream, kind),
+                            repository_label=f"{full_name} wiki",
                         )
                         logger.info(
                             "Mirrored wiki for %s repository %s", source_provider, full_name

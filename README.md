@@ -26,7 +26,8 @@ deletes a destination repository.
 
 ## Features
 
-- Complete bare Git mirrors: branches, tags, history, notes, and other refs via `git push --mirror`
+- Bare Git mirrors preserve branches, tags, history, notes, and other ordinary refs; provider-owned
+  pull refs are an explicit opt-in because they can number in the hundreds of thousands
 - Persistent validated source caches with incremental fetch, automatic recovery, garbage collection,
   and stale-entry expiry
 - Optional versioned TOML inventory for explicit Forgejo and GitLab repositories
@@ -80,7 +81,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.7.1` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.7.2` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -113,7 +114,7 @@ files first. The ignored `.env` file is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.7.1
+git checkout v0.7.2
 ```
 
 When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
@@ -202,6 +203,7 @@ in the Docker host's configured credential store when a private deployment image
 | `PACKAGE_MAX_BYTES` | `0` | Conservative per-image size ceiling; `0` disables it |
 | `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Per Skopeo registry operation timeout |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload LFS objects before publishing Git refs |
+| `GIT_PULL_REFS_ENABLED` | `false` | Preserve provider-owned `refs/pull/*` commits under a safe namespace |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Clone, fetch, or push timeout per command |
 | `GIT_CACHE_PATH` | `/data/git-mirrors` | Persistent bare-mirror cache used for incremental Git and LFS fetches |
 | `GIT_CACHE_RETENTION_DAYS` | `30` | Retain cache entries absent from discovery; `0` removes them immediately |
@@ -276,12 +278,12 @@ are in [External sources](docs/wiki/External-Sources.md).
 
 ## Git semantics and LFS
 
-GitHarbor creates a persistent bare `git clone --mirror` cache for each source repository. Later
-synchronizations run `git fetch --prune` into that cache before `git push --mirror`, so only new Git
-objects need to be fetched and uploaded. The cache is stored under `GIT_CACHE_PATH` (on the default
-Docker `/data` volume). It can be discarded while GitHarbor is stopped; the next synchronization
-recreates it. This cache is validated before reuse and automatically rebuilt if it is invalid or
-corrupt. Active caches receive `git gc --auto`, and entries absent from successful discovery expire after
+GitHarbor creates a persistent bare cache for each source repository. Later synchronizations run
+`git fetch --prune` into that cache before `git push --mirror`, so only new Git objects need to be
+fetched and uploaded. The cache is stored under `GIT_CACHE_PATH` (on the default Docker `/data`
+volume). It can be discarded while GitHarbor is stopped; the next synchronization recreates it.
+This cache is validated before reuse and automatically rebuilt if it is invalid or corrupt. Active
+caches receive `git gc --auto`, and entries absent from successful discovery expire after
 `GIT_CACHE_RETENTION_DAYS`. GitHarbor processes up to `SYNC_CONCURRENCY` repositories at once. This
 preserves ordinary Git objects and refs, including force pushes and upstream ref deletions.
 GitHarbor retries a destination push after
@@ -290,10 +292,17 @@ idempotent. Deleting an upstream branch or tag therefore also deletes that ref f
 GitHarbor-managed destination; deleting the destination repository itself never happens
 automatically.
 
-GitHub's read-only `refs/pull/*` namespace conflicts with Gitea's own pull-request refs. GitHarbor
-preserves those commits under `refs/githarbor/github-pull/*` before pushing, avoiding Gitea hook
-rejections without discarding PR-only history. After each ref push, GitHarbor sets Gitea's default
-branch to the source provider's current default branch.
+Provider-owned `refs/pull/*` refs are excluded by default. Large GitHub projects can expose more
+than 100,000 of these internal refs, making otherwise ordinary destination pushes impractical. Set
+`GIT_PULL_REFS_ENABLED=true` to retain their PR-only commits under
+`refs/githarbor/github-pull/*`; actual pull-request metadata is not migrated in either mode.
+Gerrit-style `refs/for/*` refs always move to `refs/githarbor/gerrit-for/*` because Gitea interprets
+the source namespace as pull-request creation commands. After each ref push, GitHarbor sets Gitea's
+default branch to the source provider's current default branch.
+
+Every Git clone, fetch, LFS operation, ref preparation, destination push, and cache-GC step logs its
+start, completion status, and duration at `LOG_LEVEL=INFO`. A timeout or cancellation terminates the
+entire Git process group so HTTP helpers cannot leave a synchronization stuck.
 
 With `GIT_LFS_ENABLED=true` (the default), GitHarbor runs authenticated `git lfs fetch --all` against
 the source and `git lfs push --all` against a named destination remote before it publishes Git refs.
@@ -449,7 +458,7 @@ container networking, namespace errors, LFS failures, scheduling, and safe issue
   that repository, and has any required organization SSO authorization.
 - **SQLite cannot open:** ensure the container's UID 10001 can write the mounted `/data` directory.
 - **Large repository timeout:** raise `GIT_TIMEOUT_SECONDS` and check cache-disk capacity. The first
-  run downloads a complete bare mirror; later runs normally fetch only changes.
+  run downloads all configured refs; later runs normally fetch only changes.
 - **LFS upload fails:** verify Gitea has `LFS_START_SERVER = true`, the token can write the repository,
   and its LFS storage has enough free space. Git refs are intentionally withheld on LFS failure.
 - **Release asset is skipped:** inspect **Last warning** on the repository page. Compare the asset

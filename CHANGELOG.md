@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-06
+
+### Changed
+
+- Provider-owned `refs/pull/*` fetching and preservation is now opt-in with
+  `GIT_PULL_REFS_ENABLED=true`; ordinary branches, tags, notes, releases, and wikis remain enabled.
+- INFO logs now report start, outcome, and duration for source clone/fetch, LFS transfer, ref
+  preparation, destination push, and individual cache-maintenance operations.
+
+### Fixed
+
+- Gerrit-style `refs/for/*` refs are preserved under `refs/githarbor/gerrit-for/*` so Gitea does
+  not interpret source refs as pull-request creation commands and reject the complete mirror push.
+- Git timeouts and cancellations now terminate the complete process group, preventing orphaned
+  HTTP and pack helpers from leaving a synchronization permanently stuck.
+
 ## [0.7.1] - 2026-09-05
 
 ### Added
@@ -19,6 +35,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Release automation publishes the tagged `docs/wiki` snapshot to the GitHub Wiki and avoids empty
   Wiki commits.
 - Dependabot version updates now cover Python dependencies in addition to pinned GitHub Actions.
+
+### Fixed
+
+- Release creation retries Gitea's transient `repo is empty` response while a freshly mirrored
+  repository is still being indexed.
 
 ### Security
 
@@ -284,7 +305,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.5...v0.6.6

@@ -173,6 +173,74 @@ async def seed_forgejo(
     return clone_url, source_commit, asset_contents
 
 
+def seed_local_repository_with_reserved_ref(tmp_path: Path) -> tuple[Path, str]:
+    source_work = tmp_path / "reserved-source-work"
+    source_bare = tmp_path / "reserved-source.git"
+    source_work.mkdir()
+    run_git("init", "--bare", str(source_bare))
+    run_git("init", "--initial-branch=master", cwd=source_work)
+    run_git("config", "user.name", "GitHarbor Integration", cwd=source_work)
+    run_git("config", "user.email", "integration@githarbor.invalid", cwd=source_work)
+    (source_work / "README.md").write_text("# Reserved ref source\n", encoding="utf-8")
+    run_git("add", "README.md", cwd=source_work)
+    run_git("commit", "-m", "Create reserved-ref source", cwd=source_work)
+    source_commit = run_git("rev-parse", "HEAD", cwd=source_work)
+    run_git("remote", "add", "origin", str(source_bare), cwd=source_work)
+    run_git("push", "origin", "master", cwd=source_work)
+    run_git("push", "origin", "HEAD:refs/pull/999/head", cwd=source_work)
+    run_git("push", "origin", "HEAD:refs/for/master", cwd=source_work)
+    return source_bare, source_commit
+
+
+@pytest.mark.asyncio
+async def test_reserved_refs_are_remapped_before_a_real_gitea_push(tmp_path: Path) -> None:
+    gitea_url = os.environ["INTEGRATION_GITEA_URL"].rstrip("/")
+    gitea_user = os.environ["INTEGRATION_GITEA_USER"]
+    gitea_password = os.environ["INTEGRATION_GITEA_PASSWORD"]
+    destination_token = await create_token(gitea_url, gitea_user, gitea_password)
+    repository_name = f"reserved-refs-{uuid4().hex[:12]}"
+    headers = {"Authorization": f"token {destination_token}"}
+    async with httpx.AsyncClient(base_url=gitea_url, headers=headers, timeout=30) as client:
+        created = await client.post(
+            "/api/v1/user/repos",
+            json={"name": repository_name, "private": False, "auto_init": False},
+        )
+    assert created.status_code == 201, created.text
+    destination_clone = str(created.json()["clone_url"])
+    source_bare, source_commit = seed_local_repository_with_reserved_ref(tmp_path)
+
+    mirror = GitMirror(
+        timeout_seconds=60,
+        lfs_enabled=False,
+        cache_path=tmp_path / "reserved-ref-cache",
+    )
+    for _attempt in range(2):
+        await mirror.mirror(
+            source_url=str(source_bare),
+            source_token="",
+            destination_url=destination_clone,
+            destination_token=destination_token,
+            destination_username=gitea_user,
+            cache_key="reserved-ref-source",
+        )
+
+    destination_environment = git_environment(tmp_path, gitea_user, destination_token)
+    advertised = run_git(
+        "ls-remote",
+        destination_clone,
+        "refs/heads/master",
+        "refs/pull/*",
+        "refs/for/*",
+        "refs/githarbor/github-pull/*",
+        "refs/githarbor/gerrit-for/*",
+        environment=destination_environment,
+    ).splitlines()
+    assert advertised == [
+        f"{source_commit}\trefs/githarbor/gerrit-for/master",
+        f"{source_commit}\trefs/heads/master",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_real_forgejo_repository_wiki_and_release_mirror_to_gitea(
     tmp_path: Path,

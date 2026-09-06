@@ -149,13 +149,22 @@ git lfs pull
 git lfs fsck
 ```
 
-## Gitea rejects `refs/pull/*`
+## Gitea rejects `refs/pull/*` or `refs/for/*`
 
 GitHub exposes pull-request-only commits through a provider-owned `refs/pull/*` namespace, which
-Gitea reserves for its own pull requests. GitHarbor v0.6.1 and newer remap these refs to
-`refs/githarbor/github-pull/*` before pushing so the commits remain preserved. If logs contain
-`hook declined to update refs/pull/...`, upgrade the GitHarbor image and retry the repository. Do not
-disable Gitea's Git hooks.
+Gitea reserves for its own pull requests. These refs are excluded by default; optional preservation
+maps them to `refs/githarbor/github-pull/*`. Some source repositories also contain Gerrit-style
+`refs/for/*` refs, which GitHarbor always maps to `refs/githarbor/gerrit-for/*` because Gitea
+interprets them as commands to create pull requests. If logs contain a hook rejection for either
+reserved namespace, upgrade the GitHarbor image and retry the repository. Do not disable Gitea's
+Git hooks.
+
+## A Git operation remains active after its timeout
+
+Current releases run every Git command in an isolated process group and terminate the complete
+group on timeout or cancellation. This prevents `git-remote-https`, `send-pack`, or `pack-objects`
+helpers from surviving their parent command. Upgrade if `docker top githarbor` shows helpers older
+than `GIT_TIMEOUT_SECONDS`.
 
 ## Release asset is skipped or the run is `partial`
 
@@ -266,7 +275,7 @@ reported in **Last warning**. A failed new-latest transfer keeps the previously 
 ## Large repository times out
 
 Increase `GIT_TIMEOUT_SECONDS`, then recreate the container. The first synchronization must download
-a complete bare mirror plus reachable LFS objects into `GIT_CACHE_PATH`; later runs normally fetch
+the configured bare mirror plus reachable LFS objects into `GIT_CACHE_PATH`; later runs normally fetch
 only changed objects. Confirm the persistent volume has enough free space, and reduce
 `SYNC_CONCURRENCY` if simultaneous large repositories saturate memory, disk I/O, network bandwidth,
 or the providers. API timeouts are controlled separately by `API_TIMEOUT_SECONDS`.

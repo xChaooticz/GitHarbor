@@ -38,6 +38,7 @@ def test_settings_validate_and_hide_tokens(tmp_path: Path) -> None:
     assert settings.sync_interval == 2700
     assert settings.sync_concurrency == 3
     assert settings.git_cache_retention_days == 30
+    assert settings.git_pull_refs_enabled is False
     assert settings.external_sources_file is None
     assert settings.wiki_enabled is True
     assert settings.releases_enabled is True

@@ -84,9 +84,10 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             github,
             gitea,
             GitMirror(
-                settings.git_timeout_seconds,
-                settings.git_lfs_enabled,
-                settings.git_cache_path,
+                timeout_seconds=settings.git_timeout_seconds,
+                lfs_enabled=settings.git_lfs_enabled,
+                cache_path=settings.git_cache_path,
+                pull_refs_enabled=settings.git_pull_refs_enabled,
             ),
             container_mirror,
         )

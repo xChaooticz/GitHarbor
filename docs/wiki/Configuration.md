@@ -8,7 +8,7 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.7.1` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.7.2` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` are also Compose-only settings. They default to
 `0.0.0.0` and `9005`, making the dashboard reachable from the private LAN.
@@ -49,6 +49,7 @@ before filling in token values.
 | `PACKAGE_MAX_BYTES` | `0` | Conservative estimated per-image byte limit; `0` disables it |
 | `PACKAGE_TRANSFER_TIMEOUT_SECONDS` | `3600` | Timeout for each registry operation; minimum 30 |
 | `GIT_LFS_ENABLED` | `true` | Fetch and upload reachable LFS objects before pushing refs |
+| `GIT_PULL_REFS_ENABLED` | `false` | Preserve provider-owned `refs/pull/*` commits in Gitea |
 | `GIT_TIMEOUT_SECONDS` | `3600` | Timeout for each Git or Git LFS command; minimum 30 |
 | `GIT_CACHE_PATH` | `/data/git-mirrors` | Persistent bare mirrors used for incremental fetches |
 | `GIT_CACHE_RETENTION_DAYS` | `30` | Days to retain cache entries absent from discovery |
@@ -90,6 +91,7 @@ CONTAINER_IMAGE_MODE=all
 PACKAGE_MAX_BYTES=0
 PACKAGE_TRANSFER_TIMEOUT_SECONDS=3600
 GIT_LFS_ENABLED=true
+GIT_PULL_REFS_ENABLED=false
 GIT_TIMEOUT_SECONDS=3600
 GIT_CACHE_PATH=/data/git-mirrors
 GIT_CACHE_RETENTION_DAYS=30
@@ -122,7 +124,7 @@ The file is reloaded for every global run and individual external retry. Removin
 marks its inventory record `unavailable` but never deletes its Gitea destination. A missing or
 invalid file fails external discovery without marking existing external entries unavailable.
 
-External sources mirror complete Git refs and reachable LFS objects plus an explicitly configured
+External sources mirror ordinary Git refs and reachable LFS objects plus an explicitly configured
 wiki. Native release metadata is enabled per entry by default. Forgejo attachments are copied when
 the API provides a declared size; GitLab asset links without a trustworthy byte size are skipped
 with a warning. Use `releases = false` or `release_assets = false` per entry to disable those layers.
@@ -161,6 +163,18 @@ the previous destination refs intact and marks that repository as an error.
 
 Set it to `false` only if pointer-only mirrors are intentional. Gitea's LFS server must be enabled;
 see [Gitea organizations](https://github.com/xChaooticz/GitHarbor/wiki/Gitea-Organizations#lfs-prerequisite).
+
+## Provider-owned pull refs
+
+`GIT_PULL_REFS_ENABLED=false` excludes `refs/pull/*` from source fetches and destination pushes.
+These provider-internal refs can exceed 100,000 on large GitHub projects, are not normal branches or
+tags, and do not contain issue comments, reviews, or other pull-request metadata. Excluding them
+retains ordinary branches, tags, notes, releases, wikis, and all history reachable through those
+refs. Existing caches are migrated in place on their next fetch.
+
+Set `GIT_PULL_REFS_ENABLED=true` only when preserving commits reachable exclusively through pull
+refs is worth the additional cache, network, and Gitea ref-processing cost. GitHarbor stores those
+refs under `refs/githarbor/github-pull/*` to avoid Gitea's reserved namespace.
 
 ## Optional mirror layers
 

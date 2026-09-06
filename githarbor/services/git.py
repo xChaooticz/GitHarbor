@@ -5,11 +5,13 @@ import hashlib
 import logging
 import os
 import shutil
+import signal
 import stat
 import tempfile
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -26,16 +28,24 @@ class GitMirror:
     destination_remote = "githarbor-destination"
     github_pull_prefix = "refs/pull/"
     preserved_pull_prefix = "refs/githarbor/github-pull/"
+    gerrit_for_prefix = "refs/for/"
+    preserved_for_prefix = "refs/githarbor/gerrit-for/"
+    reserved_ref_mappings = (
+        (github_pull_prefix, preserved_pull_prefix),
+        (gerrit_for_prefix, preserved_for_prefix),
+    )
 
     def __init__(
         self,
         timeout_seconds: int = 3600,
         lfs_enabled: bool = True,
         cache_path: Path | None = None,
+        pull_refs_enabled: bool = False,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.lfs_enabled = lfs_enabled
         self.cache_path = cache_path
+        self.pull_refs_enabled = pull_refs_enabled
 
     async def mirror(
         self,
@@ -46,6 +56,7 @@ class GitMirror:
         destination_username: str,
         cache_key: str | None = None,
         source_username: str = "x-access-token",
+        repository_label: str | None = None,
     ) -> None:
         await self._mirror_repository(
             source_url=source_url,
@@ -58,6 +69,7 @@ class GitMirror:
             preserve_destination_head=False,
             cache_key=cache_key,
             source_username=source_username,
+            repository_label=repository_label,
         )
 
     async def mirror_wiki(
@@ -69,6 +81,7 @@ class GitMirror:
         destination_username: str,
         cache_key: str | None = None,
         source_username: str = "x-access-token",
+        repository_label: str | None = None,
     ) -> None:
         await self._mirror_repository(
             source_url=source_url,
@@ -81,6 +94,7 @@ class GitMirror:
             preserve_destination_head=True,
             cache_key=cache_key,
             source_username=source_username,
+            repository_label=repository_label,
         )
 
     async def remote_has_refs(
@@ -114,49 +128,76 @@ class GitMirror:
         preserve_destination_head: bool,
         cache_key: str | None,
         source_username: str,
+        repository_label: str | None,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="githarbor-") as temporary:
             root = Path(temporary)
             askpass = self._create_askpass(root)
             mirror_path = self._cached_mirror_path(cache_key, directory_name)
+            operation_label = repository_label or cache_key or directory_name
+            exclude_pull_refs = directory_name == "repository.git" and not self.pull_refs_enabled
             if mirror_path is None:
                 mirror_path = root / directory_name
-                await self._clone(
-                    source_url, mirror_path, root, askpass, source_username, source_token
-                )
+                async with self._timed_operation("source_clone", operation_label):
+                    await self._clone(
+                        source_url,
+                        mirror_path,
+                        root,
+                        askpass,
+                        source_username,
+                        source_token,
+                        exclude_pull_refs,
+                    )
             elif mirror_path.is_dir() and not mirror_path.is_symlink():
-                await self._refresh_cached_mirror(
-                    source_url, mirror_path, root, askpass, source_username, source_token
-                )
+                async with self._timed_operation("source_fetch", operation_label):
+                    await self._refresh_cached_mirror(
+                        source_url,
+                        mirror_path,
+                        root,
+                        askpass,
+                        source_username,
+                        source_token,
+                        exclude_pull_refs,
+                    )
             else:
-                await self._replace_cached_mirror(
-                    source_url, mirror_path, root, askpass, source_username, source_token
-                )
-            if transfer_lfs:
-                await self._run(
-                    self.lfs_fetch_command(mirror_path, source_url),
+                async with self._timed_operation("source_clone", operation_label):
+                    await self._replace_cached_mirror(
+                        source_url,
+                        mirror_path,
+                        root,
+                        askpass,
+                        source_username,
+                        source_token,
+                        exclude_pull_refs,
+                    )
+            async with self._timed_operation("ref_prepare", operation_label):
+                await self._prepare_reserved_refs(
+                    mirror_path,
                     root,
                     self._environment(askpass, source_username, source_token),
                     [source_token],
                 )
-                await self._run(
-                    self.configure_destination_remote_command(mirror_path, destination_url),
-                    root,
-                    self._environment(askpass, destination_username, destination_token),
-                    [destination_token],
-                )
-                await self._run(
-                    self.lfs_push_command(mirror_path, destination_url),
-                    root,
-                    self._environment(askpass, destination_username, destination_token),
-                    [destination_token],
-                )
-            await self._remap_github_pull_refs(
-                mirror_path,
-                root,
-                self._environment(askpass, source_username, source_token),
-                [source_token],
-            )
+            if transfer_lfs:
+                async with self._timed_operation("lfs_fetch", operation_label):
+                    await self._run(
+                        self.lfs_fetch_command(mirror_path, source_url),
+                        root,
+                        self._environment(askpass, source_username, source_token),
+                        [source_token],
+                    )
+                async with self._timed_operation("lfs_push", operation_label):
+                    await self._run(
+                        self.configure_destination_remote_command(mirror_path, destination_url),
+                        root,
+                        self._environment(askpass, destination_username, destination_token),
+                        [destination_token],
+                    )
+                    await self._run(
+                        self.lfs_push_command(mirror_path, destination_url),
+                        root,
+                        self._environment(askpass, destination_username, destination_token),
+                        [destination_token],
+                    )
             push_command = self.push_command(mirror_path, destination_url)
             if preserve_destination_head:
                 source_head = await self._local_head_ref(
@@ -171,13 +212,14 @@ class GitMirror:
                 push_command = self.wiki_push_command(
                     mirror_path, destination_url, source_head, destination_head
                 )
-            await self._run(
-                push_command,
-                root,
-                self._environment(askpass, destination_username, destination_token),
-                [destination_token],
-                retry_transient=True,
-            )
+            async with self._timed_operation("destination_push", operation_label):
+                await self._run(
+                    push_command,
+                    root,
+                    self._environment(askpass, destination_username, destination_token),
+                    [destination_token],
+                    retry_transient=True,
+                )
             if self.cache_path is not None and cache_key is not None:
                 try:
                     os.utime(mirror_path)
@@ -202,13 +244,26 @@ class GitMirror:
         askpass: Path,
         source_username: str,
         source_token: str,
+        exclude_pull_refs: bool,
     ) -> None:
+        environment = self._environment(askpass, source_username, source_token)
+        if not exclude_pull_refs:
+            await self._run(
+                self.clone_command(source_url, mirror_path),
+                root,
+                environment,
+                [source_token],
+            )
+            return
+        await self._run(self.init_bare_command(mirror_path), root, environment, [source_token])
         await self._run(
-            self.clone_command(source_url, mirror_path),
+            self.add_source_remote_command(mirror_path, source_url),
             root,
-            self._environment(askpass, source_username, source_token),
+            environment,
             [source_token],
         )
+        await self._configure_source_remote(mirror_path, root, environment, exclude_pull_refs)
+        await self._run(self.fetch_command(mirror_path), root, environment, [source_token])
 
     async def _refresh_cached_mirror(
         self,
@@ -218,12 +273,19 @@ class GitMirror:
         askpass: Path,
         source_username: str,
         source_token: str,
+        exclude_pull_refs: bool,
     ) -> None:
         environment = self._environment(askpass, source_username, source_token)
         if not await self._is_bare_mirror(mirror_path, root, environment):
             logger.warning("Rebuilding invalid Git mirror cache entry: %s", mirror_path.name)
             await self._replace_cached_mirror(
-                source_url, mirror_path, root, askpass, source_username, source_token
+                source_url,
+                mirror_path,
+                root,
+                askpass,
+                source_username,
+                source_token,
+                exclude_pull_refs,
             )
             return
         try:
@@ -233,10 +295,17 @@ class GitMirror:
                 environment,
                 [source_token],
             )
+            await self._configure_source_remote(mirror_path, root, environment, exclude_pull_refs)
         except GitError:
             logger.warning("Rebuilding misconfigured Git mirror cache entry: %s", mirror_path.name)
             await self._replace_cached_mirror(
-                source_url, mirror_path, root, askpass, source_username, source_token
+                source_url,
+                mirror_path,
+                root,
+                askpass,
+                source_username,
+                source_token,
+                exclude_pull_refs,
             )
             return
         try:
@@ -251,7 +320,13 @@ class GitMirror:
                 raise
             logger.warning("Rebuilding corrupt Git mirror cache entry: %s", mirror_path.name)
             await self._replace_cached_mirror(
-                source_url, mirror_path, root, askpass, source_username, source_token
+                source_url,
+                mirror_path,
+                root,
+                askpass,
+                source_username,
+                source_token,
+                exclude_pull_refs,
             )
 
     async def _is_bare_mirror(
@@ -260,12 +335,7 @@ class GitMirror:
         returncode, stdout, _stderr = await self._execute(
             self.bare_mirror_check_command(mirror_path), root, environment
         )
-        if returncode != 0 or stdout.strip() != b"true":
-            return False
-        returncode, stdout, _stderr = await self._execute(
-            self.source_refspec_check_command(mirror_path), root, environment
-        )
-        return returncode == 0 and stdout.splitlines() == [b"+refs/*:refs/*"]
+        return returncode == 0 and stdout.strip() == b"true"
 
     async def _is_healthy_mirror(
         self, mirror_path: Path, root: Path, environment: Mapping[str, str]
@@ -283,6 +353,7 @@ class GitMirror:
         askpass: Path,
         source_username: str,
         source_token: str,
+        exclude_pull_refs: bool,
     ) -> None:
         mirror_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
@@ -290,7 +361,13 @@ class GitMirror:
         ) as staging:
             staged_mirror = Path(staging) / mirror_path.name
             await self._clone(
-                source_url, staged_mirror, root, askpass, source_username, source_token
+                source_url,
+                staged_mirror,
+                root,
+                askpass,
+                source_username,
+                source_token,
+                exclude_pull_refs,
             )
             replaced_path: Path | None = None
             if mirror_path.exists() or mirror_path.is_symlink():
@@ -311,6 +388,20 @@ class GitMirror:
                         replaced_path.name,
                         exc.__class__.__name__,
                     )
+
+    async def _configure_source_remote(
+        self,
+        mirror_path: Path,
+        root: Path,
+        environment: Mapping[str, str],
+        exclude_pull_refs: bool,
+    ) -> None:
+        await self._run(self.configure_mirror_remote_command(mirror_path), root, environment, [])
+        await self._run(self.replace_fetch_refspec_command(mirror_path), root, environment, [])
+        if exclude_pull_refs:
+            await self._run(
+                self.add_excluded_pull_refspec_command(mirror_path), root, environment, []
+            )
 
     @staticmethod
     def _remove_cache_entry(path: Path) -> None:
@@ -343,15 +434,19 @@ class GitMirror:
                 "LC_ALL": "C.UTF-8",
             }
         )
+        entries = list(self.cache_path.iterdir())
+        maintenance_started = time.monotonic()
+        logger.info("Git cache maintenance started: entries=%d", len(entries))
         removed = 0
-        for entry in self.cache_path.iterdir():
+        for entry in entries:
             try:
                 age_seconds = max(0.0, now - entry.stat(follow_symlinks=False).st_mtime)
                 if entry.name in active_names:
                     if entry.is_dir() and not entry.is_symlink():
-                        returncode, _stdout, stderr = await self._execute(
-                            self.cache_gc_command(entry), self.cache_path, environment
-                        )
+                        async with self._timed_operation("cache_gc", entry.name):
+                            returncode, _stdout, stderr = await self._execute(
+                                self.cache_gc_command(entry), self.cache_path, environment
+                            )
                         if returncode:
                             detail = stderr.decode("utf-8", errors="replace").strip()
                             logger.warning(
@@ -376,6 +471,12 @@ class GitMirror:
                 )
         if removed:
             logger.info("Removed %d expired Git mirror cache entries", removed)
+        logger.info(
+            "Git cache maintenance finished: entries=%d removed=%d duration_seconds=%.3f",
+            len(entries),
+            removed,
+            time.monotonic() - maintenance_started,
+        )
 
     @staticmethod
     def _is_managed_cache_name(name: str) -> bool:
@@ -391,6 +492,14 @@ class GitMirror:
         return ["git", "clone", "--mirror", "--", source_url, str(mirror_path)]
 
     @staticmethod
+    def init_bare_command(mirror_path: Path) -> list[str]:
+        return ["git", "init", "--bare", str(mirror_path)]
+
+    @staticmethod
+    def add_source_remote_command(mirror_path: Path, source_url: str) -> list[str]:
+        return ["git", "-C", str(mirror_path), "remote", "add", "origin", source_url]
+
+    @staticmethod
     def set_remote_url_command(mirror_path: Path, source_url: str) -> list[str]:
         return ["git", "-C", str(mirror_path), "remote", "set-url", "origin", source_url]
 
@@ -403,8 +512,32 @@ class GitMirror:
         return ["git", "-C", str(mirror_path), "rev-parse", "--is-bare-repository"]
 
     @staticmethod
-    def source_refspec_check_command(mirror_path: Path) -> list[str]:
-        return ["git", "-C", str(mirror_path), "config", "--get-all", "remote.origin.fetch"]
+    def configure_mirror_remote_command(mirror_path: Path) -> list[str]:
+        return ["git", "-C", str(mirror_path), "config", "remote.origin.mirror", "true"]
+
+    @staticmethod
+    def replace_fetch_refspec_command(mirror_path: Path) -> list[str]:
+        return [
+            "git",
+            "-C",
+            str(mirror_path),
+            "config",
+            "--replace-all",
+            "remote.origin.fetch",
+            "+refs/*:refs/*",
+        ]
+
+    @staticmethod
+    def add_excluded_pull_refspec_command(mirror_path: Path) -> list[str]:
+        return [
+            "git",
+            "-C",
+            str(mirror_path),
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            "^refs/pull/*",
+        ]
 
     @staticmethod
     def mirror_health_check_command(mirror_path: Path) -> list[str]:
@@ -485,23 +618,22 @@ class GitMirror:
             raise GitError(f"Invalid {description} default branch: {ref or 'missing'}")
         return ref
 
-    @staticmethod
-    def list_special_refs_command(mirror_path: Path) -> list[str]:
+    @classmethod
+    def list_special_refs_command(cls, mirror_path: Path) -> list[str]:
         return [
             "git",
             "-C",
             str(mirror_path),
             "for-each-ref",
             "--format=%(refname) %(objectname)",
-            "refs/pull/",
-            "refs/githarbor/github-pull/",
+            *(prefix for mapping in cls.reserved_ref_mappings for prefix in mapping),
         ]
 
     @staticmethod
     def update_refs_command(mirror_path: Path) -> list[str]:
         return ["git", "-C", str(mirror_path), "update-ref", "--stdin"]
 
-    async def _remap_github_pull_refs(
+    async def _prepare_reserved_refs(
         self,
         mirror_path: Path,
         cwd: Path,
@@ -521,19 +653,28 @@ class GitMirror:
             refs[ref] = object_id
 
         transaction = ["start"]
-        for ref, object_id in refs.items():
-            if not ref.startswith(self.github_pull_prefix):
-                continue
-            suffix = ref.removeprefix(self.github_pull_prefix)
-            preserved_ref = f"{self.preserved_pull_prefix}{suffix}"
-            preserved_object_id = refs.get(preserved_ref)
-            if preserved_object_id is not None and preserved_object_id != object_id:
-                raise GitError(
-                    f"Source ref {ref} collides with reserved preservation ref {preserved_ref}"
-                )
-            if preserved_object_id is None:
-                transaction.append(f"create {preserved_ref} {object_id}")
-            transaction.append(f"delete {ref} {object_id}")
+        if not self.pull_refs_enabled:
+            for ref, object_id in refs.items():
+                if ref.startswith((self.github_pull_prefix, self.preserved_pull_prefix)):
+                    transaction.append(f"delete {ref} {object_id}")
+
+        mappings: Sequence[tuple[str, str]] = self.reserved_ref_mappings
+        if not self.pull_refs_enabled:
+            mappings = ((self.gerrit_for_prefix, self.preserved_for_prefix),)
+        for source_prefix, preserved_prefix in mappings:
+            for ref, object_id in refs.items():
+                if not ref.startswith(source_prefix):
+                    continue
+                suffix = ref.removeprefix(source_prefix)
+                preserved_ref = f"{preserved_prefix}{suffix}"
+                preserved_object_id = refs.get(preserved_ref)
+                if preserved_object_id is not None and preserved_object_id != object_id:
+                    raise GitError(
+                        f"Source ref {ref} collides with reserved preservation ref {preserved_ref}"
+                    )
+                if preserved_object_id is None:
+                    transaction.append(f"create {preserved_ref} {object_id}")
+                transaction.append(f"delete {ref} {object_id}")
         if len(transaction) == 1:
             return
         transaction.extend(("prepare", "commit", ""))
@@ -635,6 +776,30 @@ class GitMirror:
         )
         return env
 
+    @staticmethod
+    @asynccontextmanager
+    async def _timed_operation(operation: str, repository: str) -> AsyncIterator[None]:
+        started = time.monotonic()
+        logger.info("Git operation started: operation=%s repository=%s", operation, repository)
+        try:
+            yield
+        except BaseException:
+            logger.info(
+                "Git operation finished: operation=%s repository=%s status=failed "
+                "duration_seconds=%.3f",
+                operation,
+                repository,
+                time.monotonic() - started,
+            )
+            raise
+        logger.info(
+            "Git operation finished: operation=%s repository=%s status=success "
+            "duration_seconds=%.3f",
+            operation,
+            repository,
+            time.monotonic() - started,
+        )
+
     async def _run(
         self,
         command: Sequence[str],
@@ -684,6 +849,7 @@ class GitMirror:
                 *command,
                 cwd=cwd,
                 env=env,
+                start_new_session=True,
                 stdin=(
                     asyncio.subprocess.PIPE
                     if input_data is not None
@@ -697,15 +863,19 @@ class GitMirror:
             )
         except TimeoutError as exc:
             if process is not None:
-                process.kill()
-                await process.communicate()
+                await self._terminate_process_group(process)
             raise GitError(f"Git operation timed out after {self.timeout_seconds} seconds") from exc
         except asyncio.CancelledError:
-            if process is not None and process.returncode is None:
-                process.kill()
-                await process.communicate()
+            if process is not None:
+                await asyncio.shield(self._terminate_process_group(process))
             raise
         except OSError as exc:
             raise GitError(f"Unable to execute Git: {exc.__class__.__name__}") from exc
         assert process.returncode is not None
         return process.returncode, stdout, stderr
+
+    @staticmethod
+    async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        await process.communicate()
