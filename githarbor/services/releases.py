@@ -23,6 +23,7 @@ from githarbor.clients.github import GitHubError, GitHubRelease, GitHubReleaseAs
 from githarbor.config import ReleaseAssetMode
 
 _MARKER_PATTERN = re.compile(r"<!-- githarbor-release:([A-Za-z0-9_-]+) -->\s*$")
+_GITEA_RELEASE_BODY_MAX_BYTES = 65_000
 
 
 class ReleaseSourceClient(Protocol):
@@ -120,6 +121,29 @@ def decode_release_marker(body: str) -> ReleaseMarker | None:
         return None
 
 
+def _bounded_release_body(source: GitHubRelease, marker: ReleaseMarker) -> tuple[str, bool]:
+    body = encode_release_body(source.body, marker)
+    if len(body.encode("utf-8")) <= _GITEA_RELEASE_BODY_MAX_BYTES:
+        return body, False
+
+    marker_body = encode_release_body("", marker)
+    notice = (
+        "\n\n---\n\n"
+        "> Release notes were truncated by GitHarbor to fit Gitea's storage limit. "
+        f"[View the complete upstream release notes]({source.html_url})."
+    )
+    suffix = f"{notice}\n\n{marker_body}"
+    available = _GITEA_RELEASE_BODY_MAX_BYTES - len(suffix.encode("utf-8"))
+    if available < 0:
+        raise GiteaError(
+            f"release {source.tag_name!r} ownership metadata exceeds Gitea's "
+            "release-note storage limit"
+        )
+
+    source_prefix = source.body.encode("utf-8")[:available].decode("utf-8", errors="ignore")
+    return f"{source_prefix}{suffix}", True
+
+
 class ReleaseMirrorService:
     def __init__(self, github: ReleaseSourceClient, gitea: GiteaClient) -> None:
         self.github = github
@@ -170,6 +194,7 @@ class ReleaseMirrorService:
                 managed[marker.github_id] = (release, marker)
 
         for source in ordered_releases:
+            note_truncated = False
             managed_release = managed.get(source.github_id)
             if managed_release is None:
                 collision = by_tag.get(source.tag_name)
@@ -180,12 +205,11 @@ class ReleaseMirrorService:
                     )
                     continue
                 marker = ReleaseMarker(source.github_id, {})
-                destination = await self.gitea.create_release(
-                    namespace, name, self._release_payload(source, marker)
-                )
+                release_payload, note_truncated = self._release_payload(source, marker)
+                destination = await self.gitea.create_release(namespace, name, release_payload)
             else:
                 destination, marker = managed_release
-                desired_payload = self._release_payload(source, marker)
+                desired_payload, note_truncated = self._release_payload(source, marker)
                 if not self._release_matches(destination, desired_payload):
                     destination = await self.gitea.update_release(
                         namespace,
@@ -193,6 +217,9 @@ class ReleaseMirrorService:
                         destination.gitea_id,
                         desired_payload,
                     )
+
+            if note_truncated:
+                warnings.append(self._truncated_note_warning(source))
 
             if not mirror_assets:
                 continue
@@ -220,7 +247,9 @@ class ReleaseMirrorService:
             if source.github_id == latest_release_id:
                 latest_assets_ready = not asset_warnings
             final_marker = ReleaseMarker(source.github_id, updated_assets)
-            final_payload = self._release_payload(source, final_marker)
+            final_payload, final_note_truncated = self._release_payload(source, final_marker)
+            if final_note_truncated and not note_truncated:
+                warnings.append(self._truncated_note_warning(source))
             if not self._release_matches(destination, final_payload):
                 await self.gitea.update_release(
                     namespace,
@@ -232,17 +261,27 @@ class ReleaseMirrorService:
         return warnings
 
     @staticmethod
-    def _release_payload(source: GitHubRelease, marker: ReleaseMarker) -> dict[str, Any]:
+    def _release_payload(
+        source: GitHubRelease, marker: ReleaseMarker
+    ) -> tuple[dict[str, Any], bool]:
+        body, note_truncated = _bounded_release_body(source, marker)
         payload: dict[str, Any] = {
             "tag_name": source.tag_name,
             "name": source.name,
-            "body": encode_release_body(source.body, marker),
+            "body": body,
             "draft": source.draft,
             "prerelease": source.prerelease,
         }
         if source.target_commitish:
             payload["target_commitish"] = source.target_commitish
-        return payload
+        return payload, note_truncated
+
+    @staticmethod
+    def _truncated_note_warning(source: GitHubRelease) -> str:
+        return (
+            f"release {source.tag_name!r} notes were truncated to fit Gitea's storage limit; "
+            f"complete notes remain available at {source.html_url}"
+        )
 
     @staticmethod
     def _release_matches(destination: GiteaRelease, payload: dict[str, Any]) -> bool:

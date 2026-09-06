@@ -182,6 +182,55 @@ def test_release_marker_round_trip_and_invalid_marker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oversized_release_notes_are_truncated_without_losing_marker() -> None:
+    source = replace(source_release(), body="Release notes 🚀\n" * 5000)
+    github = FakeGitHub([source], {})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+
+    assert warnings == [
+        "release 'v1.0.0' notes were truncated to fit Gitea's storage limit; "
+        "complete notes remain available at "
+        "https://github.test/octocat/project/releases/tag/v1.0.0"
+    ]
+    body = gitea.releases[1].body
+    assert len(body.encode("utf-8")) <= 65_000
+    assert "Release notes were truncated by GitHarbor" in body
+    assert source.html_url in body
+    assert decode_release_marker(body) == ReleaseMarker(source.github_id, {})
+
+    assert await service.mirror("octocat/project", "archive", "project") == warnings
+    assert gitea.creates == 1
+    assert gitea.updates == 0
+
+
+@pytest.mark.asyncio
+async def test_release_note_limit_reserves_space_for_asset_marker_growth() -> None:
+    content = b"asset"
+    asset = source_asset(201, "asset.zip", content)
+    source = replace(source_release(asset), body="x" * 64_850)
+    github = FakeGitHub([source], {asset.github_id: content})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+
+    assert len(warnings) == 1
+    assert "notes were truncated" in warnings[0]
+    body = gitea.releases[1].body
+    assert len(body.encode("utf-8")) <= 65_000
+    marker = decode_release_marker(body)
+    assert marker is not None
+    assert marker.assets[asset.github_id].name == asset.name
+
+    assert await service.mirror("octocat/project", "archive", "project") == warnings
+    assert gitea.creates == 1
+    assert gitea.updates == 1
+
+
+@pytest.mark.asyncio
 async def test_release_assets_are_idempotent_and_oversized_assets_warn() -> None:
     small_content = b"safe asset"
     small = source_asset(201, "small.zip", small_content)

@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-06
+
+### Fixed
+
+- Oversized upstream release notes are now truncated on a UTF-8 boundary before they exceed
+  Gitea's release-note storage limit. The mirrored release, GitHarbor ownership and asset marker,
+  and a link to the complete upstream notes are retained, while synchronization reports a focused
+  non-fatal warning instead of abandoning release mirroring for that repository.
+
 ## [0.7.3] - 2026-09-06
 
 ### Added
@@ -327,7 +336,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...v0.7.1
