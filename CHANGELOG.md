@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-06
+
+### Added
+
+- The dashboard now links its current warning count to a focused repository view that displays
+  every affected repository and its full warning. Repository errors can be filtered in the same
+  view.
+- The dashboard and browser tab use the GitHarbor logo, with an About page that links to the
+  project, credits its author, and checks GitHub for a newer release without sharing credentials.
+
+### Changed
+
+- GitHarbor branding now uses a transparent PNG logo consistently across the dashboard and browser
+  favicon.
+- Runtime dependency minimums and development tooling were updated; container publishing now uses
+  docker/setup-qemu-action v4.3.0.
+
+### Fixed
+
+- Synchronization warnings are now discoverable from the dashboard rather than being visible only
+  on individual repository detail pages.
+
 ## [0.7.2] - 2026-09-06
 
 ### Changed
@@ -305,7 +327,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.6.6...v0.7.0

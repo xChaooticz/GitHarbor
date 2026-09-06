@@ -157,6 +157,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         request: Request,
         kind: str | None = None,
         repository_status: Annotated[str | None, Query(alias="status")] = None,
+        issue: str | None = None,
         search: str | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
@@ -169,6 +170,12 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             filters.append(Repository.kind == kind)
         if repository_status:
             filters.append(Repository.status == repository_status)
+        if issue == "warning":
+            filters.append(Repository.last_warning.is_not(None))
+        elif issue == "error":
+            filters.append(Repository.last_error.is_not(None))
+        elif issue:
+            raise HTTPException(status_code=422, detail="issue must be warning or error")
         if search:
             filters.append(Repository.upstream_full_name.contains(search))
         statement = (
@@ -240,6 +247,7 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         request: Request,
         kind: str = "",
         repository_status: Annotated[str, Query(alias="status")] = "",
+        issue: str = "",
         search: str = "",
     ) -> HTMLResponse:
         database, service, _ = dependencies(request)
@@ -248,6 +256,12 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             statement = statement.where(Repository.kind == kind)
         if repository_status:
             statement = statement.where(Repository.status == repository_status)
+        if issue == "warning":
+            statement = statement.where(Repository.last_warning.is_not(None))
+        elif issue == "error":
+            statement = statement.where(Repository.last_error.is_not(None))
+        elif issue:
+            raise HTTPException(status_code=422, detail="issue must be warning or error")
         if search:
             statement = statement.where(Repository.upstream_full_name.contains(search))
         with database.session_factory() as session:
@@ -257,7 +271,12 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
             "repositories.html",
             {
                 "repositories": repositories,
-                "filters": {"kind": kind, "status": repository_status, "search": search},
+                "filters": {
+                    "kind": kind,
+                    "status": repository_status,
+                    "issue": issue,
+                    "search": search,
+                },
                 "admin_actions_available": request.app.state.settings.admin_actions_available,
                 "auto_refresh": True,
                 "sync_running": service.is_running,
@@ -286,6 +305,17 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
                 "admin_actions_available": request.app.state.settings.admin_actions_available,
                 "auto_refresh": True,
                 "sync_running": service.is_running,
+            },
+        )
+
+    @application.get("/about", response_class=HTMLResponse)
+    def about_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "about.html",
+            {
+                "version": __version__,
+                "admin_actions_available": request.app.state.settings.admin_actions_available,
             },
         )
 

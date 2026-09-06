@@ -172,6 +172,7 @@ async def test_per_repository_sync_is_locked(tmp_path: Path, upstream: UpstreamR
         "unavailable": 0,
         "unstarred": 0,
         "error": 0,
+        "warning": 0,
     }
     assert await service.sync_repository(repository_id, "test") is False
     git.release.set()

@@ -663,6 +663,11 @@ class SyncService:
                 .tuples()
                 .all()
             )
+            repositories_with_warnings = session.scalar(
+                select(func.count())
+                .select_from(Repository)
+                .where(Repository.last_warning.is_not(None))
+            )
             last_run = session.scalar(
                 select(SyncRun)
                 .where(SyncRun.scope == "global")
@@ -684,6 +689,7 @@ class SyncService:
                 "unavailable": total_by_status.get(RepositoryStatus.UNAVAILABLE.value, 0),
                 "unstarred": total_by_status.get(RepositoryStatus.UNSTARRED.value, 0),
                 "error": total_by_status.get(RepositoryStatus.ERROR.value, 0),
+                "warning": repositories_with_warnings or 0,
             },
         }
 

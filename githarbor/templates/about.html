@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}About · GitHarbor{% endblock %}
+{% block content %}
+<section class="page-heading about-heading">
+  <div>
+    <p class="eyebrow">About GitHarbor</p>
+    <h1>A safe harbor for the code you care about.</h1>
+    <p class="muted">GitHarbor preserves your GitHub and configured external repositories in your own Gitea instance.</p>
+  </div>
+  <img class="about-logo" src="{{ url_for('static', path='/githarbor-logo.png') }}" alt="GitHarbor logo">
+</section>
+<section class="panel about-grid">
+  <div>
+    <h2>Project</h2>
+    <p class="muted">GitHarbor is open source and built with care by <a href="https://github.com/xChaooticz" target="_blank" rel="noreferrer">xChaooticz</a>.</p>
+    <a class="github-button" href="https://github.com/xChaooticz/GitHarbor" target="_blank" rel="noreferrer">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.49c-2.01.44-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.2 1.87.86 2.33.65.07-.52.28-.86.51-1.06-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 4.73c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+      GitHub repository
+    </a>
+  </div>
+  <div class="release-status" data-installed-version="{{ version }}">
+    <p class="eyebrow">Version</p>
+    <h2>Installed: v{{ version }}</h2>
+    <p class="muted" data-release-message aria-live="polite">Checking GitHub for a newer release…</p>
+    <a class="release-link" data-release-link hidden target="_blank" rel="noreferrer">View release ↗</a>
+  </div>
+</section>
+<p class="update-note">The version check is performed directly by your browser. It never sends your GitHub or Gitea credentials, and GitHarbor never updates itself automatically.</p>
+<script>
+  (() => {
+    const status = document.querySelector(".release-status");
+    const message = document.querySelector("[data-release-message]");
+    const link = document.querySelector("[data-release-link]");
+    const installed = status.dataset.installedVersion;
+    const numericVersion = (value) => value.replace(/^v/, "").split("-")[0].split(".").map((part) => Number(part) || 0);
+    const isNewer = (candidate, current) => {
+      const latest = numericVersion(candidate);
+      const present = numericVersion(current);
+      for (let index = 0; index < Math.max(latest.length, present.length); index += 1) {
+        if ((latest[index] || 0) !== (present[index] || 0)) return (latest[index] || 0) > (present[index] || 0);
+      }
+      return false;
+    };
+    fetch("https://api.github.com/repos/xChaooticz/GitHarbor/releases/latest", {headers: {Accept: "application/vnd.github+json"}})
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((release) => {
+        const newer = isNewer(release.tag_name, installed);
+        link.href = release.html_url;
+        link.hidden = false;
+        status.classList.add(newer ? "update-available" : "release-current");
+        message.textContent = newer
+          ? `${release.tag_name} is available. Review the release notes before upgrading.`
+          : `You are running the latest release (${release.tag_name}).`;
+      })
+      .catch(() => { message.textContent = "Could not check GitHub for updates right now."; });
+  })();
+</script>
+{% endblock %}

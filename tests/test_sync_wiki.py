@@ -296,6 +296,11 @@ async def test_release_asset_warning_is_persisted_as_partial_run(
         assert repository.status == RepositoryStatus.ACTIVE.value
         assert len(repository.runs) == 1
         assert repository.runs[0].status == RunStatus.PARTIAL.value
+    assert service.status()["counts"]["warning"] == 1
+
+    service.release_mirror = RecordingReleaseMirror()  # type: ignore[assignment]
+    assert await service.sync_repository(repository_id, "test") is True
+    assert service.status()["counts"]["warning"] == 0
 
 
 @pytest.mark.asyncio
