@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-12
+
+### Changed
+
+- Updated Python runtime and development dependency minimums and pinned Docker publishing actions.
+
 ## [0.8.0] - 2026-11-12
 
 ### Added
@@ -360,7 +366,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...v0.7.3
