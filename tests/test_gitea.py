@@ -146,8 +146,10 @@ async def test_initialize_wiki_preserves_existing_pages() -> None:
 @pytest.mark.asyncio
 async def test_set_default_branch_updates_repository() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "PATCH"
         assert request.url.path == "/repos/archive/project"
+        if request.method == "GET":
+            return httpx.Response(200, json={"empty": False})
+        assert request.method == "PATCH"
         assert request.content == b'{"default_branch":"develop"}'
         return httpx.Response(200, json={"default_branch": "develop"})
 
@@ -158,6 +160,49 @@ async def test_set_default_branch_updates_repository() -> None:
     )
     await client.set_default_branch("archive", "project", "develop")
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_set_default_branch_waits_for_first_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[str] = []
+    sleep = AsyncMock()
+    monkeypatch.setattr("githarbor.clients.gitea.asyncio.sleep", sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json={"empty": len(requests) == 1})
+        return httpx.Response(200, json={"default_branch": "develop"})
+
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/", transport=httpx.MockTransport(handler)
+    )
+    try:
+        await client.set_default_branch("archive", "project", "develop")
+    finally:
+        await client.close()
+    assert requests == ["GET", "GET", "PATCH"]
+    sleep.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_default_branch_does_not_prune_when_initialization_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("githarbor.clients.gitea.asyncio.sleep", AsyncMock())
+    client = GiteaClient("https://gitea.test", "secret")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://gitea.test/",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"empty": True})),
+    )
+    try:
+        with pytest.raises(GiteaError, match="initializ"):
+            await client.set_default_branch("archive", "project", "develop")
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
