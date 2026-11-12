@@ -22,6 +22,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   while an organization-reset request is in flight.
 - Isolate tests from local environment settings and clarify wiki ref retention, scheduling, and
   the sensitive output of `docker compose config` in the documentation.
+- Pull the integration-test Forgejo image from its official mirror to avoid Codeberg registry outages.
 - Publish source refs and update Gitea's default branch before pruning obsolete refs, avoiding
   rejected mirror pushes when the previous destination default branch was removed upstream.
 - Coordinate operations on the same Git cache entry within the application, including maintenance,

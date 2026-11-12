@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       forgejo:
-        image: codeberg.org/forgejo/forgejo:11.0.8
+        image: data.forgejo.org/forgejo/forgejo:11.0.8
         env:
           FORGEJO__database__DB_TYPE: sqlite3
           FORGEJO__security__INSTALL_LOCK: "true"
