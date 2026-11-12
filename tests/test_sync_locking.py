@@ -185,6 +185,24 @@ async def test_per_repository_sync_is_locked(tmp_path: Path, upstream: UpstreamR
 
 
 @pytest.mark.asyncio
+async def test_maintenance_blocks_sync_requests(
+    tmp_path: Path, upstream: UpstreamRepository
+) -> None:
+    database = Database(f"sqlite:///{tmp_path.joinpath('state.db').as_posix()}")
+    Base.metadata.create_all(database.engine)
+    service = SyncService(
+        make_settings(tmp_path), database, FakeGitHub(upstream), FakeGitea(), BlockingGit()
+    )  # type: ignore[arg-type]
+    assert service.begin_maintenance()
+    assert not service.begin_maintenance()
+    assert not service.start_global_sync("test")
+    assert not service.start_repository_sync(1, "test")
+    service.end_maintenance()
+    assert service.start_repository_sync(1, "test")
+    await service._repository_tasks[1]
+
+
+@pytest.mark.asyncio
 async def test_stop_active_syncs_cancels_work_without_stopping_the_service(
     tmp_path: Path, upstream: UpstreamRepository
 ) -> None:

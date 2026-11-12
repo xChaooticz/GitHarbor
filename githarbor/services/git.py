@@ -10,7 +10,7 @@ import stat
 import tempfile
 import time
 import uuid
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -46,6 +46,7 @@ class GitMirror:
         self.lfs_enabled = lfs_enabled
         self.cache_path = cache_path
         self.pull_refs_enabled = pull_refs_enabled
+        self._cache_locks: dict[str, asyncio.Lock] = {}
 
     async def mirror(
         self,
@@ -57,6 +58,7 @@ class GitMirror:
         cache_key: str | None = None,
         source_username: str = "x-access-token",
         repository_label: str | None = None,
+        before_prune: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         await self._mirror_repository(
             source_url=source_url,
@@ -70,6 +72,7 @@ class GitMirror:
             cache_key=cache_key,
             source_username=source_username,
             repository_label=repository_label,
+            before_prune=before_prune,
         )
 
     async def mirror_wiki(
@@ -95,6 +98,7 @@ class GitMirror:
             cache_key=cache_key,
             source_username=source_username,
             repository_label=repository_label,
+            before_prune=None,
         )
 
     async def remote_has_refs(
@@ -129,6 +133,56 @@ class GitMirror:
         cache_key: str | None,
         source_username: str,
         repository_label: str | None,
+        before_prune: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        mirror_path = self._cached_mirror_path(cache_key, directory_name)
+        if mirror_path is not None:
+            async with self._cache_locks.setdefault(mirror_path.name, asyncio.Lock()):
+                await self._mirror_locked(
+                    source_url,
+                    source_token,
+                    destination_url,
+                    destination_token,
+                    destination_username,
+                    transfer_lfs=transfer_lfs,
+                    directory_name=directory_name,
+                    preserve_destination_head=preserve_destination_head,
+                    cache_key=cache_key,
+                    source_username=source_username,
+                    repository_label=repository_label,
+                    before_prune=before_prune,
+                )
+        else:
+            await self._mirror_locked(
+                source_url,
+                source_token,
+                destination_url,
+                destination_token,
+                destination_username,
+                transfer_lfs=transfer_lfs,
+                directory_name=directory_name,
+                preserve_destination_head=preserve_destination_head,
+                cache_key=cache_key,
+                source_username=source_username,
+                repository_label=repository_label,
+                before_prune=before_prune,
+            )
+
+    async def _mirror_locked(
+        self,
+        source_url: str,
+        source_token: str,
+        destination_url: str,
+        destination_token: str,
+        destination_username: str,
+        *,
+        transfer_lfs: bool,
+        directory_name: str,
+        preserve_destination_head: bool,
+        cache_key: str | None,
+        source_username: str,
+        repository_label: str | None,
+        before_prune: Callable[[], Awaitable[None]] | None,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="githarbor-") as temporary:
             root = Path(temporary)
@@ -213,6 +267,15 @@ class GitMirror:
                     mirror_path, destination_url, source_head, destination_head
                 )
             async with self._timed_operation("destination_push", operation_label):
+                if before_prune is not None:
+                    await self._run(
+                        self.non_pruning_push_command(mirror_path, destination_url),
+                        root,
+                        self._environment(askpass, destination_username, destination_token),
+                        [destination_token],
+                        retry_transient=True,
+                    )
+                    await before_prune()
                 await self._run(
                     push_command,
                     root,
@@ -443,7 +506,10 @@ class GitMirror:
                 age_seconds = max(0.0, now - entry.stat(follow_symlinks=False).st_mtime)
                 if entry.name in active_names:
                     if entry.is_dir() and not entry.is_symlink():
-                        async with self._timed_operation("cache_gc", entry.name):
+                        async with (
+                            self._cache_locks.setdefault(entry.name, asyncio.Lock()),
+                            self._timed_operation("cache_gc", entry.name),
+                        ):
                             returncode, _stdout, stderr = await self._execute(
                                 self.cache_gc_command(entry), self.cache_path, environment
                             )
@@ -461,8 +527,11 @@ class GitMirror:
                         removed += 1
                     continue
                 if self._is_managed_cache_name(entry.name) and age_seconds >= retention_seconds:
-                    self._remove_cache_entry(entry)
-                    removed += 1
+                    async with self._cache_locks.setdefault(entry.name, asyncio.Lock()):
+                        # A mirror may have refreshed this entry while maintenance waited.
+                        if entry.exists() and now - entry.stat().st_mtime >= retention_seconds:
+                            self._remove_cache_entry(entry)
+                            removed += 1
             except OSError as exc:
                 logger.warning(
                     "Unable to maintain Git mirror cache entry %s: %s",
@@ -558,6 +627,20 @@ class GitMirror:
             "--mirror",
             "--",
             destination_url,
+        ]
+
+    @staticmethod
+    def non_pruning_push_command(mirror_path: Path, destination_url: str) -> list[str]:
+        return [
+            "git",
+            "-C",
+            str(mirror_path),
+            "push",
+            "--no-verify",
+            "--force",
+            "--",
+            destination_url,
+            "refs/*:refs/*",
         ]
 
     @staticmethod

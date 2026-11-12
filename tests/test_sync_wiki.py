@@ -71,8 +71,10 @@ class RecordingGit:
         self.wiki_ref_checks = 0
         self.wiki_mirrors: list[dict[str, Any]] = []
 
-    async def mirror(self, **_kwargs: Any) -> None:
+    async def mirror(self, **kwargs: Any) -> None:
         self.primary_mirrors += 1
+        if kwargs.get("before_prune"):
+            await kwargs["before_prune"]()
 
     async def remote_has_refs(self, _source_url: str, _source_token: str) -> bool:
         self.wiki_ref_checks += 1

@@ -188,6 +188,7 @@ class ReleaseMirrorService:
 
         managed: dict[int, tuple[GiteaRelease, ReleaseMarker]] = {}
         by_tag = {release.tag_name: release for release in destination_releases}
+        source_ids = {release.github_id for release in source_releases}
         for release in destination_releases:
             marker = decode_release_marker(release.body)
             if marker is not None:
@@ -199,14 +200,36 @@ class ReleaseMirrorService:
             if managed_release is None:
                 collision = by_tag.get(source.tag_name)
                 if collision is not None:
-                    warnings.append(
-                        f"release {source.tag_name!r} skipped: an unmanaged Gitea release "
-                        "already uses that tag"
+                    old_marker = decode_release_marker(collision.body)
+                    if old_marker is None:
+                        warnings.append(
+                            f"release {source.tag_name!r} skipped: an unmanaged Gitea release "
+                            "already uses that tag"
+                        )
+                        continue
+                    assets = (
+                        collision.assets
+                        if collision.assets is not None
+                        else await self.gitea.list_release_assets(
+                            namespace, name, collision.gitea_id
+                        )
                     )
-                    continue
-                marker = ReleaseMarker(source.github_id, {})
-                release_payload, note_truncated = self._release_payload(source, marker)
-                destination = await self.gitea.create_release(namespace, name, release_payload)
+                    if old_marker.github_id in source_ids or old_marker.assets or assets:
+                        warnings.append(
+                            f"release {source.tag_name!r} skipped: a previously managed Gitea "
+                            "release with a different source ID uses that tag; review its "
+                            "ownership and attachments"
+                        )
+                        continue
+                    marker = ReleaseMarker(source.github_id, {})
+                    release_payload, note_truncated = self._release_payload(source, marker)
+                    destination = await self.gitea.update_release(
+                        namespace, name, collision.gitea_id, release_payload
+                    )
+                else:
+                    marker = ReleaseMarker(source.github_id, {})
+                    release_payload, note_truncated = self._release_payload(source, marker)
+                    destination = await self.gitea.create_release(namespace, name, release_payload)
             else:
                 destination, marker = managed_release
                 desired_payload, note_truncated = self._release_payload(source, marker)
@@ -314,6 +337,17 @@ class ReleaseMirrorService:
         mirrored = dict(previous)
         warnings: list[str] = []
 
+        # Keep the old attachments until the complete replacement set has transferred.
+        for asset in source.assets:
+            warning = await self._mirror_asset(
+                source, asset, destination, mirrored, by_id, by_name, settings, namespace, name
+            )
+            if warning:
+                warnings.append(warning)
+
+        if warnings:
+            return mirrored, warnings
+
         for github_id, record in list(mirrored.items()):
             if github_id in current_source_ids:
                 continue
@@ -342,21 +376,6 @@ class ReleaseMirrorService:
             by_id.pop(attachment.gitea_id, None)
             by_name.pop(attachment.name, None)
 
-        for asset in source.assets:
-            warning = await self._mirror_asset(
-                source,
-                asset,
-                destination,
-                mirrored,
-                by_id,
-                by_name,
-                settings,
-                namespace,
-                name,
-            )
-            if warning:
-                warnings.append(warning)
-
         return mirrored, warnings
 
     async def _mirror_asset(
@@ -380,6 +399,11 @@ class ReleaseMirrorService:
             elif attachment.size != asset.size:
                 return f"{prefix}: the mapped Gitea attachment size changed"
             else:
+                if asset.digest and previous.digest != asset.digest:
+                    return (
+                        f"{prefix}: source digest changed or was not previously recorded; "
+                        "existing attachment retained"
+                    )
                 if attachment.name != asset.name:
                     try:
                         attachment = await self.gitea.rename_release_asset(
@@ -412,6 +436,8 @@ class ReleaseMirrorService:
             )
         collision = by_name.get(asset.name)
         if collision is not None:
+            if any(record.gitea_id == collision.gitea_id for record in mirrored.values()):
+                return f"{prefix}: an older managed attachment has the same name and was retained"
             return f"{prefix}: an unmanaged Gitea attachment already uses that name"
 
         try:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from collections.abc import Mapping, Sequence
@@ -72,3 +73,29 @@ async def test_fetch_failure_keeps_a_healthy_cache_instead_of_rebuilding(
         await mirror.mirror("source", "", "destination", "", "", cache_key="owned-1")
 
     rebuild.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_same_cache_entry_serializes_mirror_operations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mirror = GitMirror(lfs_enabled=False, cache_path=tmp_path / "cache")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def blocking_mirror(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(mirror, "_mirror_locked", blocking_mirror)
+    first = asyncio.create_task(mirror.mirror("source", "", "destination", "", "", "same"))
+    await entered.wait()
+    second = asyncio.create_task(mirror.mirror("source", "", "destination", "", "", "same"))
+    await asyncio.sleep(0)
+    assert calls == 1
+    release.set()
+    await asyncio.gather(first, second)
+    assert calls == 2

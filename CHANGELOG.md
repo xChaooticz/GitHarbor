@@ -7,6 +7,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-12
+
+### Added
+
+- Integration coverage against Gitea for switching the default branch before pruning and for
+  recovering an empty previously managed release after its source ID changes.
+
+### Fixed
+
+- Keep previously mirrored release attachments until their replacements have uploaded; report
+  source digest changes without claiming unverified destination content matches.
+- Share the repository concurrency limit across manual and global work, and prevent new syncs
+  while an organization-reset request is in flight.
+- Isolate tests from local environment settings and clarify wiki ref retention, scheduling, and
+  the sensitive output of `docker compose config` in the documentation.
+- Publish source refs and update Gitea's default branch before pruning obsolete refs, avoiding
+  rejected mirror pushes when the previous destination default branch was removed upstream.
+- Coordinate operations on the same Git cache entry within the application, including maintenance,
+  to prevent overlapping updates. Document recovery from lock files left by interrupted Git runs.
+- Reconcile a recreated source release with its previously managed Gitea release when the old
+  source ID is absent and the destination has no recorded or existing attachments. Ambiguous
+  collisions and releases with attachments remain untouched and produce a more specific warning.
+
 ## [0.7.4] - 2026-09-06
 
 ### Fixed
@@ -336,7 +359,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.1...v0.7.2

@@ -8,6 +8,38 @@ import pytest
 
 from githarbor.services.git import GitMirror
 
+
+@pytest.mark.asyncio
+async def test_default_branch_changes_before_obsolete_branch_is_pruned(tmp_path: Path) -> None:
+    source = tmp_path / "source.git"
+    destination = tmp_path / "destination.git"
+    work = tmp_path / "work"
+    work.mkdir()
+    run_git("init", "--bare", str(source))
+    run_git("init", "--bare", str(destination))
+    run_git("init", "--initial-branch=main", cwd=work)
+    run_git("config", "user.name", "Test", cwd=work)
+    run_git("config", "user.email", "test@example.test", cwd=work)
+    (work / "file").write_text("content", encoding="utf-8")
+    run_git("add", "file", cwd=work)
+    run_git("commit", "-m", "initial", cwd=work)
+    run_git("push", str(source), "main", cwd=work)
+    run_git("push", str(destination), "main:old", cwd=work)
+    run_git("symbolic-ref", "HEAD", "refs/heads/old", cwd=destination)
+    run_git("config", "receive.denyDeleteCurrent", "refuse", cwd=destination)
+
+    async def switch_default() -> None:
+        assert ref_exists(destination, "refs/heads/main")
+        assert ref_exists(destination, "refs/heads/old")
+        run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=destination)
+
+    await GitMirror(lfs_enabled=False).mirror(
+        str(source), "", str(destination), "", "", before_prune=switch_default
+    )
+    assert ref_exists(destination, "refs/heads/main")
+    assert not ref_exists(destination, "refs/heads/old")
+
+
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 

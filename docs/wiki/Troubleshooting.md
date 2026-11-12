@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## Git cache lock remains after interruption
+
+Git can leave a `.lock` file behind if its process or the container is interrupted. Stop
+GitHarbor and ensure no other process or container is using the cache volume. Then remove the
+affected cache repository (the path ending in `-repository.git` or `-wiki.git` shown in the error)
+from the volume and restart GitHarbor. The next sync rebuilds that cache from the source. Do not
+remove locks or cache entries while Git is using them. The destination repository is separate.
+
 Start with the container status and recent logs:
 
 ```sh
@@ -19,8 +27,8 @@ docker compose config
 docker compose logs githarbor
 ```
 
-`docker compose config` validates Compose interpolation but can display resolved non-secret settings;
-do not share its output publicly without reviewing it. Confirm `.env` exists beside
+`docker compose config` can display resolved environment values, including secrets; do not share its
+output without carefully redacting it. Confirm `.env` exists beside
 `docker-compose.yml`. The supplied volume path must be writable by container UID `10001`.
 
 ## Gitea, GitHub, or external provider connection fails
@@ -309,7 +317,7 @@ external entry, and run discovery again; the stable provider identity reconnects
 - Remember that the interval resets after process restart.
 - Check for a still-running large synchronization; overlapping global runs are rejected.
 - Check whether the configured `SYNC_CONCURRENCY` and repository sizes make one run longer than the
-  interval. The next scheduled delay begins after the current run completes.
+  interval. Scheduled attempts run at fixed intervals and are skipped while a sync is active.
 
 ## Ask for help safely
 

@@ -8,7 +8,7 @@ docker compose up -d --force-recreate githarbor
 ```
 
 `GITHARBOR_IMAGE_TAG` is used by Compose rather than the application. It defaults to `latest`; set
-it to a release such as `v0.7.2` when you want a reproducible deployment. The Compose file keeps a
+it to a release such as `v0.8.0` when you want a reproducible deployment. The Compose file keeps a
 local `build` definition, so `docker compose up -d --build` builds from the checked-out source.
 `GITHARBOR_BIND_ADDRESS` and `GITHARBOR_PORT` are also Compose-only settings. They default to
 `0.0.0.0` and `9005`, making the dashboard reachable from the private LAN.
@@ -138,7 +138,8 @@ field reference, Compose mount, credential examples, naming rules, and verificat
 
 ## Scheduling and concurrency
 
-`SYNC_INTERVAL` is the delay between complete runs. Valid examples are `900`, `30m`, `6h`, and
+`SYNC_INTERVAL` is the interval between scheduled attempts. An attempt is skipped if a sync is
+already running. Valid examples are `900`, `30m`, `6h`, and
 `1d`. The schedule is in process memory; after a restart, `SYNC_ON_STARTUP=true` performs a fresh run
 and the interval begins again.
 

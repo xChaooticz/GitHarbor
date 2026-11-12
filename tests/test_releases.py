@@ -294,6 +294,56 @@ async def test_removed_source_asset_is_deleted_only_with_ownership_marker() -> N
 
 
 @pytest.mark.asyncio
+async def test_failed_replacement_keeps_previous_attachment() -> None:
+    original = source_asset(201, "old.zip", b"old")
+    replacement = source_asset(202, "new.zip", b"x" * (1024 * 1024 + 1))
+    github = FakeGitHub([source_release(original)], {201: b"old"})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+    await service.mirror("octocat/project", "archive", "project")
+    github.releases = [source_release(replacement)]
+    gitea.settings = AttachmentSettings(True, "", 1, 5)
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+    assert warnings and "exceeds" in warnings[0]
+    assert [asset.name for asset in gitea.assets[1].values()] == ["old.zip"]
+    assert gitea.deleted_assets == []
+
+
+@pytest.mark.asyncio
+async def test_same_name_replacement_keeps_previous_attachment() -> None:
+    original = source_asset(201, "asset.zip", b"old")
+    replacement = source_asset(202, "asset.zip", b"new")
+    github = FakeGitHub([source_release(original)], {201: b"old", 202: b"new"})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+    await service.mirror("octocat/project", "archive", "project")
+    github.releases = [source_release(replacement)]
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+    assert warnings and "older managed attachment" in warnings[0]
+    assert [asset.name for asset in gitea.assets[1].values()] == ["asset.zip"]
+    assert gitea.deleted_assets == []
+
+
+@pytest.mark.asyncio
+async def test_changed_digest_does_not_claim_existing_attachment_was_verified() -> None:
+    original = source_asset(201, "asset.zip", b"old")
+    changed = source_asset(201, "asset.zip", b"new")
+    github = FakeGitHub([source_release(original)], {201: b"old"})
+    gitea = FakeGitea(None)
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+    await service.mirror("octocat/project", "archive", "project")
+    github.releases = [source_release(changed)]
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+    assert warnings and "source digest changed" in warnings[0]
+    marker = decode_release_marker(gitea.releases[1].body)
+    assert marker is not None and marker.assets[201].digest == original.digest
+    assert gitea.deleted_assets == []
+
+
+@pytest.mark.asyncio
 async def test_unmanaged_release_tag_collision_is_reported_without_overwrite() -> None:
     github = FakeGitHub([source_release()], {})
     gitea = FakeGitea(None)
@@ -306,6 +356,39 @@ async def test_unmanaged_release_tag_collision_is_reported_without_overwrite() -
         "release 'v1.0.0' skipped: an unmanaged Gitea release already uses that tag"
     ]
     assert gitea.releases[99].body == "Created manually"
+
+
+@pytest.mark.asyncio
+async def test_recreated_source_release_reuses_empty_managed_release() -> None:
+    github = FakeGitHub([source_release(release_id=102)], {})
+    gitea = FakeGitea(None)
+    gitea.releases[99] = GiteaRelease(
+        99, "v1.0.0", encode_release_body("Old notes", ReleaseMarker(101, {}))
+    )
+    gitea.assets[99] = {}
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+
+    assert await service.mirror("octocat/project", "archive", "project") == []
+    assert decode_release_marker(gitea.releases[99].body) == ReleaseMarker(102, {})
+    assert gitea.creates == 0
+    assert await service.mirror("octocat/project", "archive", "project") == []
+    assert gitea.updates == 1
+
+
+@pytest.mark.asyncio
+async def test_recreated_release_with_existing_assets_is_retained() -> None:
+    github = FakeGitHub([source_release(release_id=102)], {})
+    gitea = FakeGitea(None)
+    body = encode_release_body("Old notes", ReleaseMarker(101, {}))
+    gitea.releases[99] = GiteaRelease(99, "v1.0.0", body)
+    gitea.assets[99] = {10: GiteaAttachment(10, "existing.zip", 12)}
+    service = ReleaseMirrorService(github, gitea)  # type: ignore[arg-type]
+
+    warnings = await service.mirror("octocat/project", "archive", "project")
+    assert "previously managed" in warnings[0]
+    assert gitea.releases[99].body == body
+    assert 10 in gitea.assets[99]
+    assert not gitea.deleted_assets
 
 
 @pytest.mark.asyncio

@@ -388,11 +388,14 @@ def create_app(provided_settings: Settings | None = None) -> FastAPI:
         if confirmation != f"DELETE ALL REPOSITORIES IN {namespace}":
             raise HTTPException(status_code=400, detail="Deletion confirmation did not match")
         _, service, _ = dependencies(request)
-        if service.is_running:
+        if not service.begin_maintenance():
             raise HTTPException(
                 status_code=409, detail="Stop synchronization before deleting repositories"
             )
-        await service.gitea.delete_organization_repositories(namespace)
+        try:
+            await service.gitea.delete_organization_repositories(namespace)
+        finally:
+            service.end_maintenance()
         return RedirectResponse(
             f"/admin?notice=Gitea+accepted+deletion+for+{namespace}.+Wait+for+it+to+finish+before+syncing.",
             status_code=303,

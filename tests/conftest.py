@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 
 import pytest
 
 from githarbor.clients.github import UpstreamRepository
+from githarbor.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    names = {name.casefold() for name in Settings.model_fields}
+    for name in os.environ:
+        if name.casefold() in names:
+            monkeypatch.delenv(name)
 
 
 @pytest.fixture

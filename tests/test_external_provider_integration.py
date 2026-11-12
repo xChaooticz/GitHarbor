@@ -14,11 +14,17 @@ import pytest
 from sqlalchemy import select
 
 from githarbor.clients.gitea import GiteaClient
+from githarbor.clients.github import GitHubRelease
 from githarbor.config import Settings
 from githarbor.database import Database
 from githarbor.models import Base, Repository, RepositoryStatus
 from githarbor.services.git import GitMirror
-from githarbor.services.releases import decode_release_marker
+from githarbor.services.releases import (
+    ReleaseMarker,
+    ReleaseMirrorService,
+    decode_release_marker,
+    encode_release_body,
+)
 from githarbor.services.sync import SyncService
 
 pytestmark = [
@@ -239,6 +245,73 @@ async def test_reserved_refs_are_remapped_before_a_real_gitea_push(tmp_path: Pat
         f"{source_commit}\trefs/githarbor/gerrit-for/master",
         f"{source_commit}\trefs/heads/master",
     ]
+
+
+@pytest.mark.asyncio
+async def test_real_gitea_default_branch_change_and_recreated_release(tmp_path: Path) -> None:
+    gitea_url = os.environ["INTEGRATION_GITEA_URL"].rstrip("/")
+    user = os.environ["INTEGRATION_GITEA_USER"]
+    token = await create_token(gitea_url, user, os.environ["INTEGRATION_GITEA_PASSWORD"])
+    name = f"branch-recovery-{uuid4().hex[:12]}"
+    async with httpx.AsyncClient(
+        base_url=gitea_url, headers={"Authorization": f"token {token}"}, timeout=30
+    ) as client:
+        created = await client.post(
+            "/api/v1/user/repos", json={"name": name, "private": False, "auto_init": False}
+        )
+    assert created.status_code == 201, created.text
+    destination = str(created.json()["clone_url"])
+    source, commit = seed_local_repository_with_reserved_ref(tmp_path)
+    environment = git_environment(tmp_path, user, token)
+    run_git(
+        "push", destination, "refs/heads/master:refs/heads/old", cwd=source, environment=environment
+    )
+    gitea = GiteaClient(f"{gitea_url}/api/v1", token)
+
+    async def switch_default() -> None:
+        await gitea.set_default_branch(user, name, "master")
+
+    class Source:
+        async def list_releases(self, _name: str) -> list[GitHubRelease]:
+            return [
+                GitHubRelease(
+                    102,
+                    "https://example.test/release",
+                    "v1",
+                    "master",
+                    "New",
+                    "new notes",
+                    False,
+                    False,
+                    (),
+                )
+            ]
+
+    try:
+        await GitMirror(timeout_seconds=60, lfs_enabled=False).mirror(
+            str(source), "", destination, token, user, before_prune=switch_default
+        )
+        advertised = run_git("ls-remote", destination, "refs/heads/*", environment=environment)
+        assert advertised == f"{commit}\trefs/heads/master"
+        release = await gitea.create_release(
+            user,
+            name,
+            {
+                "tag_name": "v1",
+                "target_commitish": "master",
+                "name": "Old",
+                "body": encode_release_body("old notes", ReleaseMarker(101, {})),
+                "draft": False,
+                "prerelease": False,
+            },
+        )
+        service = ReleaseMirrorService(Source(), gitea)  # type: ignore[arg-type]
+        assert await service.mirror("source/repo", user, name, mirror_assets=False) == []
+        updated = await gitea.list_releases(user, name)
+        assert updated[0].gitea_id == release.gitea_id
+        assert decode_release_marker(updated[0].body) == ReleaseMarker(102, {})
+    finally:
+        await gitea.close()
 
 
 @pytest.mark.asyncio

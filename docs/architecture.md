@@ -41,7 +41,8 @@ are excluded by default because very large projects can expose hundreds of thous
 explicit preservation mode fetches them and transactionally moves them to
 `refs/githarbor/github-pull/*`. Gerrit-style `refs/for/*` refs always move to
 `refs/githarbor/gerrit-for/*` because Gitea reserves both source namespaces for its own pull-request
-handling. After the push, the Gitea API applies the source provider's current default branch.
+handling. GitHarbor publishes refs before the Gitea API applies the source provider's current
+default branch; a subsequent mirror push prunes obsolete refs.
 Tokens are supplied through a short-lived askpass environment and redacted from errors. Git
 subprocesses run in isolated process groups so timeout and cancellation terminate their HTTP and
 pack helpers as well as the parent command.
@@ -57,7 +58,8 @@ Wikis are separate Git repositories rather than part of the primary repository. 
 GitHarbor uses the upstream `has_wiki` capability as a cheap first check and derives the standard
 wiki URL. External sources require an explicit `wiki_url`, so omission performs no probe. In either
 case, GitHarbor verifies that the wiki remote has refs, skips an empty wiki, enables Gitea's native
-wiki unit, and mirror-pushes the complete wiki history. Wiki repositories do not use the primary
+wiki unit, and pushes source branches and tags without pruning destination refs. Wiki repositories
+do not use the primary
 repository's LFS transfer path.
 
 External Forgejo and GitLab sources are deliberately file-driven rather than inferred from arbitrary

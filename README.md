@@ -81,7 +81,7 @@ source instead, use:
 docker compose up -d --build
 ```
 
-Set `GITHARBOR_IMAGE_TAG=v0.7.4` in `.env` to pin a specific published release. If the GitHarbor
+Set `GITHARBOR_IMAGE_TAG=v0.8.0` in `.env` to pin a specific published release. If the GitHarbor
 package itself is private, log the Docker host in before Compose tries to pull it:
 
 ```sh
@@ -114,7 +114,7 @@ files first. The ignored `.env` file is retained:
 
 ```sh
 git fetch --tags
-git checkout v0.7.4
+git checkout v0.8.0
 ```
 
 When `GITHARBOR_IMAGE_TAG` is pinned, change it in `.env` to the same new release tag. With `latest`,
@@ -297,8 +297,8 @@ than 100,000 of these internal refs, making otherwise ordinary destination pushe
 `GIT_PULL_REFS_ENABLED=true` to retain their PR-only commits under
 `refs/githarbor/github-pull/*`; actual pull-request metadata is not migrated in either mode.
 Gerrit-style `refs/for/*` refs always move to `refs/githarbor/gerrit-for/*` because Gitea interprets
-the source namespace as pull-request creation commands. After each ref push, GitHarbor sets Gitea's
-default branch to the source provider's current default branch.
+the source namespace as pull-request creation commands. GitHarbor publishes refs, sets Gitea's
+default branch to the source provider's current default branch, then prunes obsolete refs.
 
 Every Git clone, fetch, LFS operation, ref preparation, destination push, and cache-GC step logs its
 start, completion status, and duration at `LOG_LEVEL=INFO`. A timeout or cancellation terminates the
@@ -321,9 +321,9 @@ individual sync. Disabled wikis are skipped without another network operation. E
 checked only when their separate `wiki_url` is explicitly configured; omission skips the wiki
 without guessing or probing a URL. An enabled but never-created or otherwise empty wiki is skipped.
 
-When pages exist, GitHarbor enables the native wiki unit on the managed Gitea destination and uses a
-bare mirror push to preserve every wiki commit and ref. Like the primary Git mirror, this makes the
-source wiki authoritative: an upstream force-update or ref deletion is reflected in Gitea. Wiki
+When pages exist, GitHarbor enables the native wiki unit on the managed Gitea destination and pushes
+source branches and tags. It also updates Gitea's default wiki branch to the source default's
+content when the branch names differ. Existing destination refs are not pruned. Wiki
 attachments committed into the wiki repository are ordinary Git objects and are
 preserved. A configured wiki clone or push failure marks the repository and run `error` after the
 primary repository has been preserved, so the incomplete optional layer is visible and retryable.
@@ -336,8 +336,11 @@ GitHub, Forgejo, or GitLab API and creates or updates native Gitea releases. It 
 title, Markdown body, target commitish, draft state, and prerelease state. A hidden marker appended
 to the Gitea release body records the source release ID and managed asset IDs without changing the
 visible source text. GitHarbor refuses to overwrite an existing same-tag Gitea release that lacks
-this ownership marker. Already-correct releases are left unchanged, avoiding unnecessary Gitea
-PATCH requests, and attachment data returned with the release list is reused.
+this ownership marker. When a source release is recreated with the same tag and a new ID,
+GitHarbor reuses the previously managed release only if its old ID is absent and it has no recorded
+or existing attachments. Other collisions are retained with a warning. Already-correct releases
+are left unchanged, avoiding unnecessary Gitea PATCH requests, and attachment data returned with
+the release list is reused.
 
 `RELEASES_ENABLED=false` skips both release metadata and assets without deleting existing Gitea
 releases. With releases enabled, `RELEASE_ASSETS_ENABLED=false` continues updating release metadata
@@ -370,6 +373,10 @@ current source response are retained. Gitea authorship and creation timestamps, 
 and download counts cannot be recreated through the target API. Forgejo attachments require a
 declared size and safe same-origin URL; GitLab links without a trustworthy size are skipped with a
 durable warning.
+
+Replacement assets are uploaded before old managed attachments are removed. If an old attachment
+has the same name as its replacement, or a previously recorded source digest changes, GitHarbor
+retains the attachment and reports a warning for review instead of overwriting unverified content.
 
 ## Container package mirroring
 

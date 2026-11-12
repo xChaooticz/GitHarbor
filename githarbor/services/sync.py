@@ -53,6 +53,8 @@ class SyncService:
         self.external_sources = ExternalSources(settings.external_sources_file)
         self.reconciler = Reconciler()
         self.global_lock = asyncio.Lock()
+        self._sync_semaphore = asyncio.Semaphore(settings.sync_concurrency)
+        self._maintenance_active = False
         self._repository_locks: dict[int, asyncio.Lock] = {}
         self._global_task: asyncio.Task[None] | None = None
         self._repository_tasks: dict[int, asyncio.Task[bool]] = {}
@@ -69,12 +71,18 @@ class SyncService:
         )
 
     def start_global_sync(self, trigger: str) -> bool:
-        if self.is_running:
+        if self._maintenance_active or self.is_running:
             return False
         self._global_task = asyncio.create_task(self.sync_all(trigger))
         return True
 
     def start_repository_sync(self, repository_id: int, trigger: str) -> bool:
+        if (
+            self._maintenance_active
+            or self.global_lock.locked()
+            or (self._global_task is not None and not self._global_task.done())
+        ):
+            return False
         task = self._repository_tasks.get(repository_id)
         if task is not None and not task.done():
             return False
@@ -82,6 +90,15 @@ class SyncService:
             self.sync_repository(repository_id, trigger=trigger)
         )
         return True
+
+    def begin_maintenance(self) -> bool:
+        if self._maintenance_active or self.is_running:
+            return False
+        self._maintenance_active = True
+        return True
+
+    def end_maintenance(self) -> None:
+        self._maintenance_active = False
 
     async def shutdown(self) -> None:
         tasks = [
@@ -298,6 +315,15 @@ class SyncService:
         trigger: str = "manual",
         upstream: SourceRepository | None = None,
     ) -> bool:
+        async with self._sync_semaphore:
+            return await self._sync_repository(repository_id, trigger, upstream)
+
+    async def _sync_repository(
+        self,
+        repository_id: int,
+        trigger: str = "manual",
+        upstream: SourceRepository | None = None,
+    ) -> bool:
         lock = self._repository_locks.setdefault(repository_id, asyncio.Lock())
         if lock.locked():
             return False
@@ -409,6 +435,13 @@ class SyncService:
                 logger.info(
                     "Mirroring Git refs: repository_id=%d upstream=%s", repository_id, full_name
                 )
+
+                async def apply_default_branch() -> None:
+                    assert upstream is not None and upstream.default_branch
+                    await self.gitea.set_default_branch(
+                        namespace, destination, upstream.default_branch
+                    )
+
                 await self.git.mirror(
                     source_url=upstream.clone_url,
                     source_token=source_token,
@@ -418,14 +451,12 @@ class SyncService:
                     destination_username=str(user["login"]),
                     cache_key=self._cache_key(upstream, kind),
                     repository_label=full_name,
+                    before_prune=apply_default_branch if upstream.default_branch else None,
                 )
                 logger.info(
                     "Git refs mirrored: repository_id=%d upstream=%s", repository_id, full_name
                 )
                 if upstream.default_branch:
-                    await self.gitea.set_default_branch(
-                        namespace, destination, upstream.default_branch
-                    )
                     logger.info(
                         "Default branch applied: repository_id=%d branch=%s",
                         repository_id,
