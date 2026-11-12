@@ -267,6 +267,8 @@ async def test_real_gitea_default_branch_change_and_recreated_release(tmp_path: 
         "push", destination, "refs/heads/master:refs/heads/old", cwd=source, environment=environment
     )
     gitea = GiteaClient(f"{gitea_url}/api/v1", token)
+    # Ensure the initial fixture push is processed before starting the mirror push.
+    await gitea.wait_repository_initialized(user, name)
 
     async def switch_default() -> None:
         await gitea.set_default_branch(user, name, "master")

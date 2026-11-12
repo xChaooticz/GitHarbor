@@ -30,6 +30,7 @@ class GiteaAssetUploadError(GiteaError):
 
 _MAX_REPOSITORY_DESCRIPTION = 2048
 _RELEASE_CREATION_ATTEMPTS = 5
+_REPOSITORY_INITIALIZATION_ATTEMPTS = 41
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +233,21 @@ class GiteaClient:
             raise GiteaError("Gitea returned an invalid wiki initialization response")
         return True
 
+    async def wait_repository_initialized(self, namespace: str, name: str) -> None:
+        # Older Gitea versions process a repository's first push asynchronously and can
+        # overwrite a default branch changed before that processing has finished.
+        for attempt in range(_REPOSITORY_INITIALIZATION_ATTEMPTS):
+            payload = await self._request("GET", f"repos/{namespace}/{name}")
+            if not isinstance(payload, dict) or not isinstance(payload.get("empty"), bool):
+                raise GiteaError("Gitea returned an invalid repository initialization state")
+            if not payload["empty"]:
+                return
+            if attempt < _REPOSITORY_INITIALIZATION_ATTEMPTS - 1:
+                await asyncio.sleep(0.5)
+        raise GiteaError(f"Gitea did not finish initializing repository {namespace}/{name}")
+
     async def set_default_branch(self, namespace: str, name: str, branch: str) -> None:
+        await self.wait_repository_initialized(namespace, name)
         payload = await self._request(
             "PATCH", f"repos/{namespace}/{name}", json={"default_branch": branch}
         )

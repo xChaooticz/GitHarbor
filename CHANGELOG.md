@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-12
+
+### Fixed
+
+- Wait for Gitea to finish processing a repository's first push before changing its default
+  branch, preventing an initialization race that could reject subsequent mirror pruning.
+
 ## [0.8.1] - 2026-11-12
 
 ### Changed
@@ -366,7 +373,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions continuous integration using the reproducible Docker test stage.
 - MIT license, contribution guide, architecture decisions, and GitHarbor logo.
 
-[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/xChaooticz/GitHarbor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/xChaooticz/GitHarbor/compare/v0.7.3...v0.7.4
